@@ -153,4 +153,6 @@ dmypy.json
 .pytype/
 
 # Cython debug symbols
-cython_debug/
+cython_debug/# pixi environments
+.pixi/*
+!.pixi/config.toml

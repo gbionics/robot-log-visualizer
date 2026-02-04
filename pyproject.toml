@@ -10,5 +10,85 @@ requires = [
     "setuptools_scm[toml]>=6.0",
 ]
 
+[project]
+name = "robot-log-visualizer"
+description = "Visualizer for robot logger"
+readme = "README.md"
+requires-python = ">=3.8"
+license = { file = "LICENSE" }
+authors = [
+    { name = "Giulio Romualdi", email = "giulio.romualdi@gmail.com" },
+]
+keywords = [
+    "robotics",
+    "visualization",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Operating System :: OS Independent",
+    "Topic :: Scientific/Engineering :: Visualization",
+    "Topic :: Software Development",
+    "Framework :: Robot Framework",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3 :: Only",
+]
+dependencies = [
+    "idyntree >= 10.2.0",
+    "meshcat",
+    "numpy",
+    "PyQt5",
+    "PyQtWebEngine",
+    "qtpy",
+    "pyqtconsole",
+    "h5py",
+    "pyqtgraph",
+]
+dynamic = ["version"]
+
+[project.urls]
+Homepage = "https://github.com/gbionics/robot-log-visualizer"
+Changelog = "https://github.com/gbionics/robot-log-visualizer/releases"
+Tracker = "https://github.com/gbionics/robot-log-visualizer/issues"
+Source = "https://github.com/gbionics/robot-log-visualizer"
+
+[project.scripts]
+robot-log-visualizer = "robot_log_visualizer.__main__:main"
+
+[tool.setuptools]
+include-package-data = true
+packages = { find = {} }
+
+[tool.setuptools.package-data]
+"*" = ["*.png", "*.svg", "*.ui"]
+
 [tool.setuptools_scm]
 local_scheme = "dirty-tag"
+
+[tool.pixi.workspace]
+channels = ["conda-forge"]
+platforms = ["linux-64", "osx-64", "win-64"]
+
+[tool.pixi.pypi-dependencies]
+robot-log-visualizer = { path = ".", editable = true }
+
+[tool.pixi.tasks]
+
+[tool.pixi.dependencies]
+numpy = "*"
+qtpy = "*"
+pyqt = "*"
+pyqtwebengine = "*"
+pyside2 = "*"
+pyqtgraph = "*"
+matplotlib = "*"
+h5py = "*"
+gst-plugins-good = "*"
+gst-plugins-bad = "*"
+idyntree = "*"
+pyqtconsole = "*"
+meshcat-python = "*"
+
