@@ -67,3 +67,28 @@ packages = { find = {} }
 
 [tool.setuptools_scm]
 local_scheme = "dirty-tag"
+
+[tool.pixi.workspace]
+channels = ["conda-forge"]
+platforms = ["linux-64", "osx-64", "win-64"]
+
+[tool.pixi.pypi-dependencies]
+robot-log-visualizer = { path = ".", editable = true }
+
+[tool.pixi.tasks]
+
+[tool.pixi.dependencies]
+numpy = ">=2.4.2,<3"
+qtpy = ">=2.4.3,<3"
+pyqt = ">=5.15.11,<6"
+pyqtwebengine = ">=5.15.11,<6"
+pyside2 = ">=5.15.15,<6"
+pyqtgraph = ">=0.14.0,<0.15"
+matplotlib = ">=3.10.8,<4"
+h5py = ">=3.15.1,<4"
+gst-plugins-good = ">=1.24.11,<2"
+gst-plugins-bad = ">=1.24.11,<2"
+idyntree = ">=13.4.2,<14"
+pyqtconsole = ">=1.2.3,<2"
+meshcat-python = ">=0.3.2,<0.4"
+
