@@ -7013,8 +7013,8 @@ packages:
   timestamp: 1765813692798
 - pypi: ./
   name: robot-log-visualizer
-  version: 0.13.1.dev2+dirty
-  sha256: 576ffd587a5a2baeea8885b9e431579c0b355b2f2fbd89bfd9ca0ed36c43d981
+  version: 0.13.1.dev4+dirty
+  sha256: d3ddf4325fba91a77930bc7739a005e41de303da63d0c12dc572f3d97d031c4f
   requires_dist:
   - idyntree>=10.2.0
   - meshcat
