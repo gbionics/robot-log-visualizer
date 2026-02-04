@@ -19,6 +19,16 @@ conda activate visualizer-env
 conda install -c robotology robot-log-visualizer
 ```
 
+### 🧚 Install with pixi
+
+You can also run the application using `pixi`:
+
+```console
+pixi run robot-log-visualizer
+```
+
+See the pixi homepage: [pixi](https://pixi.run).
+
 ### 🐍 Install from `pip` with apt python
 
 Install `python3`, if not installed (in **Ubuntu 20.04**):
@@ -48,7 +58,7 @@ python -m pip install git+https://github.com/ami-iit/robot-log-visualizer.git
 
 ## 🏃 Usage
 
-Once you have installed the `robot-log-visualizer` you can run it from the terminal
+Once you have installed the `robot-log-visualizer` you can run it from the terminal.
 
 [robot-log-visualizer.webm](https://github.com/ami-iit/robot-log-visualizer/assets/16744101/3fd5c516-da17-4efa-b83b-392b5ce1383b)
 
