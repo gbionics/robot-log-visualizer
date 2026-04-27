@@ -10,6 +10,9 @@ import numpy as np
 import pyqtgraph as pg  # type: ignore
 from qtpy import QtCore, QtWidgets  # type: ignore
 
+# --- Global pyqtgraph performance tuning ---
+pg.setConfigOptions(antialias=False, useOpenGL=True)
+
 from robot_log_visualizer.signal_provider.signal_provider import ProviderType
 from robot_log_visualizer.utils.utils import ColorPalette
 
@@ -55,6 +58,7 @@ class PyQtGraphViewerCanvas(QtWidgets.QWidget):
 
         # data structures
         self._curves: Dict[str, pg.PlotDataItem] = {}
+        self._curve_fulldata: Dict[str, tuple] = {}  # key -> (x, y) full-res
         self._annotations: Dict[Point, pg.TextItem] = {}
         self._markers: Dict[Point, pg.ScatterPlotItem] = {}
         self._palette: Iterable = ColorPalette()
@@ -129,7 +133,12 @@ class PyQtGraphViewerCanvas(QtWidgets.QWidget):
     def quit_animation(self) -> None:  # noqa: D401
         """Permanently stop the animation (e.g. when closing the tab)."""
         self._timer.stop()
-
+    def update_vline_value(self, value: float) -> None:
+        """Directly set the vline position (called from update_index)."""
+        if value == getattr(self, '_last_vline_val', None):
+            return
+        self._last_vline_val = value
+        self._vline.setValue(value)
     # -------------------------------------------------------------#
     # Qt event handlers                                            #
     # -------------------------------------------------------------#
@@ -146,6 +155,11 @@ class PyQtGraphViewerCanvas(QtWidgets.QWidget):
         self._layout = QtWidgets.QVBoxLayout(self)
         self._plot: pg.PlotWidget = pg.PlotWidget(background="w")
         self._layout.addWidget(self._plot)
+
+        # --- Performance: only render points visible in the current
+        # view-port and auto-downsample when zoomed out.
+        self._plot.setClipToView(True)
+        self._plot.setDownsampling(mode="peak")
 
         label_style = {"color": "#000000", "font-size": "12pt"}
         self._plot.setLabel("bottom", "Time [s]", **label_style)
@@ -193,13 +207,18 @@ class PyQtGraphViewerCanvas(QtWidgets.QWidget):
             palette_color = next(self._palette)
             pen = pg.mkPen(palette_color.as_hex(), width=2)
 
+            # Pre-downsample for fast rendering (207k → ~4000 points)
+            x_ds, y_ds = self._downsample_peak(x, y)
+
             self._curves[key] = self._plot.plot(
-                x,
-                y,
+                x_ds,
+                y_ds,
                 pen=pen,
                 name="/".join(legend[1:]),
                 symbol=None,
+                clipToView=True,
             )
+            self._curve_fulldata[key] = (x, y)
 
             # For real-time mode, disable curve clickability to avoid interfering with live updates
             if self._signal_provider.provider_type == ProviderType.REALTIME:
@@ -211,13 +230,46 @@ class PyQtGraphViewerCanvas(QtWidgets.QWidget):
         valid = {"/".join(p) for p in paths}
         for key in [k for k in self._curves if k not in valid]:
             self._plot.removeItem(self._curves.pop(key))
+            self._curve_fulldata.pop(key, None)
+
+    @staticmethod
+    def _downsample_peak(x, y, max_points: int = 4000):
+        """Peak-preserving downsample: keep min/max per window."""
+        n = len(x)
+        if n <= max_points:
+            return x, y
+        factor = max(1, n // (max_points // 2))
+        trim = (n // factor) * factor
+        yr = y[:trim].reshape(-1, factor)
+        xr = x[:trim].reshape(-1, factor)
+        stx = factor // 2
+        x_mid = xr[:, stx]
+        y_max_v = yr.max(axis=1)
+        y_min_v = yr.min(axis=1)
+        out_n = len(x_mid) * 2
+        x_out = np.empty(out_n, dtype=x.dtype)
+        y_out = np.empty(out_n, dtype=y.dtype)
+        x_out[0::2] = x_mid
+        x_out[1::2] = x_mid
+        y_out[0::2] = y_max_v
+        y_out[1::2] = y_min_v
+        if trim < n:
+            x_out = np.concatenate([x_out, x[trim:]])
+            y_out = np.concatenate([y_out, y[trim:]])
+        return x_out, y_out
 
     def _update_vline(self) -> None:
         """Move the vertical line to ``current_time``."""
         if self._signal_provider is None:
             return
 
-        self._vline.setValue(self._signal_provider.current_time)
+        new_val = self._signal_provider.current_time
+        # Skip the update (and the expensive repaint it triggers) when the
+        # position has not actually changed.
+        if new_val == getattr(self, '_last_vline_val', None):
+            return
+        self._last_vline_val = new_val
+        self._vline.setValue(new_val)
 
     def _update_realtime_curves(self):
         """Update all curves with the latest data from the signal provider."""

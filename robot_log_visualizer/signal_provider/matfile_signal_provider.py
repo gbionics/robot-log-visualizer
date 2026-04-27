@@ -70,6 +70,10 @@ class MatfileSignalProvider(SignalProvider):
 
     def __populate_numerical_data(self, file_object):
         data = {}
+        # Cache for timestamp deduplication: share identical arrays
+        ts_cache = getattr(self, '_ts_cache', {})
+        self._ts_cache = ts_cache
+
         for key, value in file_object.items():
             if not isinstance(value, h5py._hl.group.Group):
                 continue
@@ -80,7 +84,15 @@ class MatfileSignalProvider(SignalProvider):
             if "data" in value.keys():
                 data[key] = {}
                 data[key]["data"] = np.squeeze(np.array(value["data"]))
-                data[key]["timestamps"] = np.squeeze(np.array(value["timestamps"]))
+                raw_ts = np.squeeze(np.array(value["timestamps"]))
+
+                # Deduplicate: reuse an existing identical timestamp array
+                ts_key = (len(raw_ts), raw_ts[0], raw_ts[-1])
+                if ts_key in ts_cache and np.array_equal(ts_cache[ts_key], raw_ts):
+                    data[key]["timestamps"] = ts_cache[ts_key]
+                else:
+                    ts_cache[ts_key] = raw_ts
+                    data[key]["timestamps"] = raw_ts
 
                 # if the initial or end time has been updated we can also update the entire timestamps dataset
                 if data[key]["timestamps"][0] < self.initial_time:
@@ -131,33 +143,40 @@ class MatfileSignalProvider(SignalProvider):
                     pass
             self.index = 0
 
+        # Pre-compute relative timestamps for binary search in run()
+        self._relative_timestamps = self.timestamps - self.initial_time
+
         return True
 
     def run(self):
+        prev_wall = time.time()
+        was_running = False
         while True:
             start = time.time()
             if self.state == PeriodicThreadState.running:
+                now = time.time()
+                if not was_running:
+                    # Just resumed — ignore stale elapsed time
+                    prev_wall = now
+                wall_elapsed = now - prev_wall
+                prev_wall = now
+                was_running = True
                 self.index_lock.lock()
-                tmp_index = self._index
-                self._current_time += self.period
+                self._current_time += wall_elapsed * self.playback_speed
                 self._current_time = min(
-                    self._current_time, self.timestamps[-1] - self.initial_time
+                    self._current_time, self._relative_timestamps[-1]
                 )
 
-                # find the index associated to the current time in self.timestamps
-                # this is valid since self.timestamps is sorted and self._current_time is increasing
-                while (
-                    self._current_time > self.timestamps[tmp_index] - self.initial_time
-                ):
-                    tmp_index += 1
-                    if tmp_index > len(self.timestamps):
-                        break
-
-                self._index = tmp_index
+                # Binary search (O(log n)) instead of linear scan
+                self._index = int(
+                    np.searchsorted(self._relative_timestamps, self._current_time)
+                )
 
                 self.index_lock.unlock()
 
                 self.update_index_signal.emit()
+            else:
+                was_running = False
 
             sleep_time = self.period - (time.time() - start)
             if sleep_time > 0:
