@@ -601,7 +601,9 @@ class RobotViewerMainWindow(QtWidgets.QMainWindow):
         self.ui.timeSlider.setValue(index)
         self.ui.timeLabel.setText(f"{current_time:.2f}")
 
-        # Push vline directly to the active plot tab (avoids separate timer)
+        # Also push the current time to the active plot tab so the vline stays
+        # in sync with the selected index. This complements the canvas timer-
+        # driven updates rather than replacing them.
         active_tab = self.ui.tabPlotWidget.currentIndex()
         if 0 <= active_tab < len(self.plot_items):
             self.plot_items[active_tab].canvas.update_vline_value(current_time)
