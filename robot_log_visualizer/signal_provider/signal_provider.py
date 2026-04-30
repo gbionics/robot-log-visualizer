@@ -87,6 +87,9 @@ class SignalProvider(QThread):
 
         self._current_time = 0
 
+        self._playback_speed = 1.0
+        self._playback_speed_lock = QMutex()
+
         self.trajectory_span = 200
 
         self.provider_type = provider_type
@@ -143,6 +146,10 @@ class SignalProvider(QThread):
 
     def __populate_numerical_data(self, file_object):
         data = {}
+        # Cache for timestamp deduplication: share identical arrays
+        ts_cache = getattr(self, '_ts_cache', {})
+        self._ts_cache = ts_cache
+
         for key, value in file_object.items():
             if not isinstance(value, h5py._hl.group.Group):
                 continue
@@ -155,9 +162,17 @@ class SignalProvider(QThread):
             if "data" in value.keys():
                 data[key] = {}
                 data[key]["data"] = np.atleast_1d(np.squeeze(np.array(value["data"])))
-                data[key]["timestamps"] = np.atleast_1d(
+                raw_ts = np.atleast_1d(
                     np.squeeze(np.array(value["timestamps"]))
                 )
+
+                # Deduplicate: reuse an existing identical timestamp array
+                ts_key = (len(raw_ts), raw_ts[0], raw_ts[-1])
+                if ts_key in ts_cache and np.array_equal(ts_cache[ts_key], raw_ts):
+                    data[key]["timestamps"] = ts_cache[ts_key]
+                else:
+                    ts_cache[ts_key] = raw_ts
+                    data[key]["timestamps"] = raw_ts
 
                 # if the initial or end time has been updated we can also update the entire timestamps dataset
                 if data[key]["timestamps"][0] < self.initial_time:
@@ -275,6 +290,16 @@ class SignalProvider(QThread):
         value = self._current_time
         return value
 
+    @property
+    def playback_speed(self):
+        locker = QMutexLocker(self._playback_speed_lock)
+        return self._playback_speed
+
+    @playback_speed.setter
+    def playback_speed(self, value):
+        locker = QMutexLocker(self._playback_speed_lock)
+        self._playback_speed = value
+
     def get_item_from_path(self, path, default_path=None):
         data = self.data[self.root_name]
 
@@ -304,7 +329,17 @@ class SignalProvider(QThread):
         if self.timestamps is None or len(self.timestamps) == 0:
             return None
 
-        closest_index = np.argmin(np.abs(timestamps - self.timestamps[index]))
+        target = self.timestamps[index]
+        # Use binary search (O(log n)) instead of linear scan (O(n))
+        closest_index = np.searchsorted(timestamps, target)
+        # Clamp and pick the nearer of the two neighbors
+        if closest_index >= len(timestamps):
+            closest_index = len(timestamps) - 1
+        elif closest_index > 0 and (
+            abs(timestamps[closest_index - 1] - target)
+            <= abs(timestamps[closest_index] - target)
+        ):
+            closest_index -= 1
 
         if neighbor == 0:
             return data[closest_index, :]

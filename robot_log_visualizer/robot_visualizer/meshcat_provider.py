@@ -237,15 +237,23 @@ class MeshcatProvider(QThread):
 
     def run(self):
         identity = np.eye(3)
+        last_index = -1
 
         while True:
             start = time.time()
 
-            index = self._signal_provider.index
             if self.state == PeriodicThreadState.running and self._is_model_loaded:
+                index = self._signal_provider.index
                 if len(self._signal_provider) == 0:
                     time.sleep(self._period)
                     continue
+                # Skip if data hasn't advanced (avoids redundant websocket sends)
+                if index == last_index:
+                    sleep_time = self._period - (time.time() - start)
+                    if sleep_time > 0:
+                        time.sleep(sleep_time)
+                    continue
+                last_index = index
                 robot_state = self._signal_provider.get_robot_state_at_index(index)
                 self.meshcat_visualizer_mutex.lock()
                 # These are the robot measured joint positions in radians

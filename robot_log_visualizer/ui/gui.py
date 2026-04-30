@@ -183,6 +183,12 @@ class RobotViewerMainWindow(QtWidgets.QMainWindow):
 
         self.ui.actionQuit.setIcon(get_icon("close-circle-outline.svg"))
         self.ui.actionQuit.setIcon(get_icon("close-circle-outline.svg"))
+
+        # Playback speed options
+        self._speed_options = [0.25, 0.5, 1.0, 1.5, 2.0, 4.0]
+        for s in self._speed_options:
+            self.ui.speedComboBox.addItem(f"{s}x")
+        self.ui.speedComboBox.setCurrentIndex(self._speed_options.index(1.0))
         self.ui.actionOpen.setIcon(get_icon("folder-open-outline.svg"))
         self.ui.actionSet_Robot_Model.setIcon(get_icon("body-outline.svg"))
         self.setWindowIcon(get_icon("icon.png"))
@@ -240,6 +246,9 @@ class RobotViewerMainWindow(QtWidgets.QMainWindow):
         self.ui.pauseButton.clicked.connect(self.pauseButton_on_click)
         self.ui.startButton.clicked.connect(self.startButton_on_click)
         self.ui.refreshButton.clicked.connect(self.refreshButton_on_click)
+        self.ui.speedComboBox.currentIndexChanged.connect(
+            self.speedComboBox_on_changed
+        )
 
         # by default the refresh button is only relevant for realtime connections
         try:
@@ -392,17 +401,12 @@ class RobotViewerMainWindow(QtWidgets.QMainWindow):
         index = int(self.ui.timeSlider.value())
         dataset_percentage = float(index) / float(self.ui.timeSlider.maximum())
 
-        for video_item in self.video_items:
-            if video_item.media_loaded:
-                video_item.media_player.setPosition(
-                    int(dataset_percentage * video_item.media_player.duration())
-                )
-
         self.signal_provider.set_dataset_percentage(dataset_percentage)
         self.ui.timeLabel.setText(f"{self.signal_provider.current_time:.2f}")
-        self.text_logger.highlight_cell(
-            self.find_text_log_index(self.get_text_log_item_path())
-        )
+
+        # Defer heavy work (video seek, text-log highlight) so the slider
+        # stays responsive while dragging.  The deferred work is performed
+        # once the user releases the slider (timeSlider_on_release).
 
     def timeSlider_on_release(self):
         index = int(self.ui.timeSlider.value())
@@ -441,6 +445,12 @@ class RobotViewerMainWindow(QtWidgets.QMainWindow):
         self.meshcat_provider.state = PeriodicThreadState.pause
 
         self.logger.write_to_log("Dataset paused.")
+
+    def speedComboBox_on_changed(self, index):
+        speed = self._speed_options[index]
+        if self.signal_provider is not None:
+            self.signal_provider.playback_speed = speed
+        self.logger.write_to_log(f"Playback speed set to {speed}x.")
 
     def plotTabCloseButton_on_click(self, index):
         self.plot_items[index].canvas.quit_animation()
@@ -495,24 +505,23 @@ class RobotViewerMainWindow(QtWidgets.QMainWindow):
         )
 
     def find_text_log_index(self, path):
+        if not path:
+            return None
+
         current_time = self.signal_provider.current_time
         initial_time = self.signal_provider.initial_time
 
-        path = self.get_text_log_item_path()
-        if path:
-            ref = self.signal_provider.text_logging_data
-            for key in path:
-                ref = ref[key]
+        ref = self.signal_provider.text_logging_data
+        for key in path:
+            ref = ref[key]
 
-            s = np.flatnonzero(ref["timestamps"] <= current_time + initial_time)
-            if len(s) == 1:
-                return s[0]
-            elif not s.any():
-                return None
-            else:
-                return s[-1]
-
-        return None
+        # Use binary search (O(log n)) instead of linear scan (O(n))
+        ts = ref["timestamps"]
+        target = current_time + initial_time
+        idx = np.searchsorted(ts, target, side="right") - 1
+        if idx < 0:
+            return None
+        return int(idx)
 
     def show_text_log(self, path):
         initial_time = self.signal_provider.initial_time
@@ -586,21 +595,35 @@ class RobotViewerMainWindow(QtWidgets.QMainWindow):
         if self.slider_pressed:
             return
 
-        self.ui.timeSlider.setValue(self.signal_provider.index)
-        self.ui.timeLabel.setText(f"{self.signal_provider.current_time:.2f}")
-        self.text_logger.highlight_cell(
-            self.find_text_log_index(self.get_text_log_item_path())
-        )
+        index = self.signal_provider.index
+        current_time = self.signal_provider.current_time
 
-        # TODO: this is a hack to update the video player and it should be done only for the activated videos
-        for video_item in self.video_items:
-            if video_item.media_loaded:
-                video_percentage = float(self.ui.timeSlider.value()) / float(
-                    self.ui.timeSlider.maximum()
-                )
-                video_item.media_player.setPosition(
-                    int(video_percentage * video_item.media_player.duration())
-                )
+        self.ui.timeSlider.setValue(index)
+        self.ui.timeLabel.setText(f"{current_time:.2f}")
+
+        # Also push the current time to the active plot tab so the vline stays
+        # in sync with the selected index. This complements the canvas timer-
+        # driven updates rather than replacing them.
+        active_tab = self.ui.tabPlotWidget.currentIndex()
+        if 0 <= active_tab < len(self.plot_items):
+            self.plot_items[active_tab].canvas.update_vline_value(current_time)
+
+        # Only update text log highlight if a text log entry is selected
+        text_path = self.get_text_log_item_path()
+        if text_path:
+            self.text_logger.highlight_cell(
+                self.find_text_log_index(text_path)
+            )
+
+        # Only seek videos that are loaded
+        slider_max = self.ui.timeSlider.maximum()
+        if slider_max > 0:
+            video_percentage = float(index) / float(slider_max)
+            for video_item in self.video_items:
+                if video_item.media_loaded:
+                    video_item.media_player.setPosition(
+                        int(video_percentage * video_item.media_player.duration())
+                    )
 
     def closeEvent(self, event):
         # ensure update callbacks are not triggered while tearing down the UI
@@ -755,6 +778,9 @@ class RobotViewerMainWindow(QtWidgets.QMainWindow):
             self.signal_provider_period, "robot_logger_device"
         )
         self.signal_provider.open(file_name)
+        self.signal_provider.playback_speed = self._speed_options[
+            self.ui.speedComboBox.currentIndex()
+        ]
         self.signal_size = len(self.signal_provider)
         self.signal_provider.start()
 
