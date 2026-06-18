@@ -145,6 +145,7 @@ class PyQtGraphViewerCanvas(QtWidgets.QWidget):
     def closeEvent(self, event):  # type: ignore[override]
         """Ensure timers are stopped before Qt destroys the object."""
         self._timer.stop()
+        self._range_change_timer.stop()
         super().closeEvent(event)
 
     # -------------------------------------------------------------#
@@ -181,9 +182,36 @@ class PyQtGraphViewerCanvas(QtWidgets.QWidget):
         self._timer.timeout.connect(self._update_vline)
         self._timer.start(self._period_ms)
 
+        # Timer for debouncing x-range changes (zoom-adaptive resampling)
+        self._range_change_timer = QtCore.QTimer(self)
+        self._range_change_timer.setSingleShot(True)
+        self._range_change_timer.setInterval(50)  # ms debounce
+        self._range_change_timer.timeout.connect(self._refresh_curves_for_viewport)
+
     def _connect_signals(self) -> None:
         """Wire Qt / pyqtgraph signals to slots."""
         self._plot.scene().sigMouseClicked.connect(self._on_mouse_click)
+        self._plot.sigXRangeChanged.connect(lambda *_: self._range_change_timer.start())
+
+    def _refresh_curves_for_viewport(self) -> None:
+        """Resample all curves to the resolution of the current visible x window."""
+        if not self._curve_fulldata or self._signal_provider is None:
+            return
+        if self._signal_provider.provider_type == ProviderType.REALTIME:
+            return
+
+        x_min, x_max = self._plot.viewRange()[0]
+
+        for key, (x_full, y_full) in self._curve_fulldata.items():
+            if key not in self._curves:
+                continue
+            mask = (x_full >= x_min) & (x_full <= x_max)
+            if not np.any(mask):
+                continue
+            x_vis = x_full[mask]
+            y_vis = y_full[mask]
+            x_ds, y_ds = self._downsample_peak(x_vis, y_vis)
+            self._curves[key].setData(x_ds, y_ds)
 
     def _add_missing_curves(
         self, paths: Sequence[Path], legends: Sequence[Legend]
@@ -216,7 +244,6 @@ class PyQtGraphViewerCanvas(QtWidgets.QWidget):
                 pen=pen,
                 name="/".join(legend[1:]),
                 symbol=None,
-                clipToView=True,
             )
             self._curve_fulldata[key] = (x, y)
 
