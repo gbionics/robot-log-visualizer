@@ -17,6 +17,7 @@ class RobotStatePath:
     def __init__(self):
         self.joints_state_path = []
         self.base_orientation_path = []
+        self.base_orientation_type = "rpy"  # "rpy", "xyzw", or "wxyz"
         self.base_position_path = []
 
 
