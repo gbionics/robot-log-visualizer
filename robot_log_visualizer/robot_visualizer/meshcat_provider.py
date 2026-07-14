@@ -9,6 +9,7 @@ from pathlib import Path
 
 import idyntree.swig as idyn
 import numpy as np
+import resolve_robotics_uri_py
 from idyntree.visualize import MeshcatVisualizer
 from qtpy.QtCore import QMutex, QMutexLocker, QThread
 
@@ -102,6 +103,43 @@ class MeshcatProvider(QThread):
                 for f in os.getenv(env).split(os.pathsep)
             ]
 
+        def get_package_uri_candidates(model):
+            package_uri_candidates = []
+
+            for share_dir in get_model_path_from_envs(self.env_list):
+                if not share_dir.is_dir():
+                    continue
+
+                for candidate in share_dir.glob(f"*/robots/{model}/model.urdf"):
+                    if candidate.is_file():
+                        package_uri_candidates.append(
+                            f"package://{candidate.parts[-4]}/robots/{model}/model.urdf"
+                        )
+
+            return package_uri_candidates
+
+        def resolve_model_path(model):
+            candidate_path = Path(model).expanduser()
+            if candidate_path.is_file():
+                return str(candidate_path.resolve())
+
+            uri_candidates = [model]
+            if not re.match(r"^[a-zA-Z][a-zA-Z0-9+.-]*://", model):
+                uri_candidates.append(f"model://{model}/model.urdf")
+                uri_candidates.extend(get_package_uri_candidates(model))
+
+            for candidate in uri_candidates:
+                try:
+                    resolved_path = resolve_robotics_uri_py.resolve_robotics_uri(candidate)
+                except Exception:
+                    continue
+
+                resolved_path = Path(resolved_path).expanduser()
+                if resolved_path.is_file():
+                    return str(resolved_path.resolve())
+
+            return None
+
         def check_if_model_exist(folder_path, model):
             path = folder_path / Path(model)
             return path.is_dir()
@@ -130,6 +168,10 @@ class MeshcatProvider(QThread):
         self.model_joints_index = []
         # In this case the user specify the model path
         if self.custom_package_dir:
+            resolved_model_path = resolve_model_path(self.model_path)
+            if resolved_model_path is not None:
+                self.model_path = resolved_model_path
+
             self.model_joints_index = find_model_joints(
                 self.model_path, considered_joints
             )
@@ -144,28 +186,28 @@ class MeshcatProvider(QThread):
                 [self.custom_package_dir],
             )
         else:
-            # Attempt to find the model in the envs folders
-            model_found_in_env_folders = False
+            self.model_path = resolve_model_path(model_name)
 
-            # Check if the model is in one of the folders specified in the envs
-            for folder in get_model_path_from_envs(self.env_list):
-                if check_if_model_exist(folder, model_name):
-                    folder_model_path = folder / Path(model_name)
-                    model_filenames = [
-                        folder_model_path / Path(f)
-                        for f in os.listdir(folder_model_path.absolute())
-                        if re.search(r"[a-zA-Z0-9_]*\.urdf", f)
-                    ]
+            if self.model_path is None:
+                # Fallback for log metadata that only carries a bare model folder name.
+                for folder in get_model_path_from_envs(self.env_list):
+                    if check_if_model_exist(folder, model_name):
+                        folder_model_path = folder / Path(model_name)
+                        model_filenames = [
+                            folder_model_path / Path(f)
+                            for f in os.listdir(folder_model_path.absolute())
+                            if re.search(r"[a-zA-Z0-9_]*\.urdf", f)
+                        ]
 
-                    if model_filenames:
-                        model_found_in_env_folders = True
-                        self.model_path = str(model_filenames[0])
-                        break
+                        if model_filenames:
+                            self.model_path = str(model_filenames[0].resolve())
+                            break
 
-            # If the model is not found we exit
-            if not model_found_in_env_folders:
+            if self.model_path is None:
                 print(
-                    f"MeshcatProvider: Unable to find the model {model_name} in the environment folders."
+                    "MeshcatProvider: Unable to resolve model "
+                    + model_name
+                    + " via resolve_robotics_uri or environment folders."
                 )
                 return False
 
