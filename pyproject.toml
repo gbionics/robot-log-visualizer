@@ -44,6 +44,7 @@ dependencies = [
     "PyQtWebEngine",
     "qtpy",
     "pyqtconsole",
+    "resolve-robotics-uri-py",
     "h5py",
     "pyqtgraph",
 ]
@@ -92,4 +93,5 @@ gst-libav = "*"
 idyntree = "*"
 pyqtconsole = "*"
 meshcat-python = "*"
+resolve-robotics-uri-py = "*"
 
