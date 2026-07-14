@@ -118,29 +118,36 @@ class MatfileSignalProvider(SignalProvider):
 
     def open(self, source: str) -> bool:
         with h5py.File(source, "r") as file:
-            root_variable = file.get(self.root_name)
             self.data = self.__populate_numerical_data(file)
 
-            if "log" in root_variable.keys():
-                self.text_logging_data["log"] = self.__populate_text_logging_data(
-                    root_variable["log"]
-                )
+            # Find the root variable: try the configured name first, then
+            # search for any top-level group that contains description_list.
+            root_variable = file.get(self.root_name)
+            if root_variable is None:
+                for name in file.keys():
+                    item = file[name]
+                    if isinstance(item, h5py._hl.group.Group) and "description_list" in item.keys():
+                        self.root_name = name
+                        root_variable = item
+                        break
 
-            for name in file.keys():
-                if "description_list" in file[name].keys():
-                    self.root_name = name
-                    break
+            if root_variable is not None:
+                if "log" in root_variable.keys():
+                    self.text_logging_data["log"] = self.__populate_text_logging_data(
+                        root_variable["log"]
+                    )
 
-            joint_ref = root_variable["description_list"]
-            self.joints_name = [
-                "".join(chr(c[0]) for c in file[ref]) for ref in joint_ref[0]
-            ]
-            if "yarp_robot_name" in root_variable.keys():
-                robot_name_ref = root_variable["yarp_robot_name"]
-                try:
-                    self.robot_name = "".join(chr(c[0]) for c in robot_name_ref)
-                except:
-                    pass
+                if "description_list" in root_variable.keys():
+                    joint_ref = root_variable["description_list"]
+                    self.joints_name = [
+                        "".join(chr(c[0]) for c in file[ref]) for ref in joint_ref[0]
+                    ]
+                if "yarp_robot_name" in root_variable.keys():
+                    robot_name_ref = root_variable["yarp_robot_name"]
+                    try:
+                        self.robot_name = "".join(chr(c[0]) for c in robot_name_ref)
+                    except:
+                        pass
             self.index = 0
 
         # Pre-compute relative timestamps for binary search in run()
