@@ -1107,6 +1107,7 @@ class RobotViewerMainWindow(QtWidgets.QMainWindow):
                 menu.addAction(dont_use_as_base_orientation_str)
             else:
                 menu.addAction(use_as_base_orientation_str + " (xyzw Quaternion)")
+                menu.addAction(use_as_base_orientation_str + " (wxyz Quaternion)")
 
         if item_size == 6:
             if item_key in self.visualized_3d_arrows:
@@ -1199,6 +1200,12 @@ class RobotViewerMainWindow(QtWidgets.QMainWindow):
                     self.robot_state_path.base_orientation_path
                 ).setBackground(0, QtGui.QBrush(deselected_base_color))
             self.robot_state_path.base_orientation_path = item_path
+            if "wxyz Quaternion" in action.text():
+                self.robot_state_path.base_orientation_type = "wxyz"
+            elif "xyzw Quaternion" in action.text():
+                self.robot_state_path.base_orientation_type = "xyzw"
+            else:
+                self.robot_state_path.base_orientation_type = "rpy"
             # In real time mode, add those signal to the provider buffer
             if (
                 self.signal_provider
@@ -1215,6 +1222,7 @@ class RobotViewerMainWindow(QtWidgets.QMainWindow):
 
         if action.text() == dont_use_as_base_orientation_str:
             self.robot_state_path.base_orientation_path = []
+            self.robot_state_path.base_orientation_type = "rpy"
             # if the item is used as base position we do not remove the color
             if item_path != self.robot_state_path.base_position_path:
                 item.setBackground(0, QtGui.QBrush(deselected_base_color))

@@ -384,9 +384,11 @@ class SignalProvider(QThread):
                 robot_state["base_orientation"][2],
             ).toNumPy()
         if robot_state["base_orientation"].shape[0] == 4:
-            # convert the x y z w quaternion into w x y z
             tmp_quat = robot_state["base_orientation"]
-            tmp_quat = np.array([tmp_quat[3], tmp_quat[0], tmp_quat[1], tmp_quat[2]])
+            if self._robot_state_path.base_orientation_type == "xyzw":
+                # convert x y z w into w x y z (iDynTree convention)
+                tmp_quat = np.array([tmp_quat[3], tmp_quat[0], tmp_quat[1], tmp_quat[2]])
+            # wxyz is already in iDynTree convention
 
             robot_state["base_orientation"] = idyn.Rotation.RotationFromQuaternion(
                 tmp_quat
