@@ -82,6 +82,8 @@ class SignalProvider(QThread):
 
         self.joints_name = []
         self.robot_name = ""
+        # version of the framework that created the log, empty if not available
+        self.version = ""
 
         self.root_name = signal_root_name
 

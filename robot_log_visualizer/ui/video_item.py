@@ -1,4 +1,5 @@
 # Copyright (C) 2022 Istituto Italiano di Tecnologia (IIT). All rights reserved.
+# Copyright (C) 2026 Generative Bionics S.R.L. All rights reserved.
 # This software may be modified and distributed under the terms of the
 # Released under the terms of the BSD 3-Clause License
 
@@ -17,12 +18,16 @@ from qtpy.QtWidgets import QFrame
 
 from robot_log_visualizer.ui.ui_loader import load_ui
 import os
+from typing import Optional
 
 
 class VideoItem(QFrame):
-    def __init__(self, video_filename: str):
+    def __init__(self, video_filename: str, start_time: Optional[float] = None):
         super().__init__(None)
         self.ui = load_ui("video_tab.ui", self)
+
+        # time of the first frame, used to synchronize the video with the dataset
+        self.start_time = start_time
 
         self.media_player = QMediaPlayer(self)
 

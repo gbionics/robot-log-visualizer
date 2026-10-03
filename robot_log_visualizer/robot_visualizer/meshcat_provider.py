@@ -2,10 +2,7 @@
 # This software may be modified and distributed under the terms of the
 # Released under the terms of the BSD 3-Clause License
 
-import os
-import re
 import time
-from pathlib import Path
 
 import idyntree.swig as idyn
 import numpy as np
@@ -33,12 +30,6 @@ class MeshcatProvider(QThread):
         self.model_path = ""
         self.custom_package_dir = ""
         self.base_frame = ""
-        self.env_list = [
-            "GAZEBO_MODEL_PATH",
-            "GZ_SIM_RESOURCE_PATH",
-            "ROS_PACKAGE_PATH",
-            "AMENT_PREFIX_PATH",
-        ]
         self._registered_3d_points = set()
         self._registered_3d_trajectories = dict()
         self._register_3d_arrow = set()
@@ -95,55 +86,6 @@ class MeshcatProvider(QThread):
         self._signal_provider = signal_provider
 
     def load_model(self, considered_joints, model_name, base_frame=None):
-        def get_model_path_from_envs(env_list):
-            return [
-                Path(f) if (env != "AMENT_PREFIX_PATH") else Path(f) / "share"
-                for env in env_list
-                if os.getenv(env) is not None
-                for f in os.getenv(env).split(os.pathsep)
-            ]
-
-        def get_package_uri_candidates(model):
-            package_uri_candidates = []
-
-            for share_dir in get_model_path_from_envs(self.env_list):
-                if not share_dir.is_dir():
-                    continue
-
-                for candidate in share_dir.glob(f"*/robots/{model}/model.urdf"):
-                    if candidate.is_file():
-                        package_uri_candidates.append(
-                            f"package://{candidate.parts[-4]}/robots/{model}/model.urdf"
-                        )
-
-            return package_uri_candidates
-
-        def resolve_model_path(model):
-            candidate_path = Path(model).expanduser()
-            if candidate_path.is_file():
-                return str(candidate_path.resolve())
-
-            uri_candidates = [model]
-            if not re.match(r"^[a-zA-Z][a-zA-Z0-9+.-]*://", model):
-                uri_candidates.append(f"model://{model}/model.urdf")
-                uri_candidates.extend(get_package_uri_candidates(model))
-
-            for candidate in uri_candidates:
-                try:
-                    resolved_path = resolve_robotics_uri_py.resolve_robotics_uri(candidate)
-                except Exception:
-                    continue
-
-                resolved_path = Path(resolved_path).expanduser()
-                if resolved_path.is_file():
-                    return str(resolved_path.resolve())
-
-            return None
-
-        def check_if_model_exist(folder_path, model):
-            path = folder_path / Path(model)
-            return path.is_dir()
-
         # Find the index of the model joints in the considered joints
         # This function is required if some of the considered joints are not in the model
         # For instance in underactuated robots
@@ -166,60 +108,24 @@ class MeshcatProvider(QThread):
         model_loader = idyn.ModelLoader()
 
         self.model_joints_index = []
-        # In this case the user specify the model path
-        if self.custom_package_dir:
-            resolved_model_path = resolve_model_path(self.model_path)
-            if resolved_model_path is not None:
-                self.model_path = resolved_model_path
-
-            self.model_joints_index = find_model_joints(
-                self.model_path, considered_joints
+        # the model is either set by the user or stored in the log as a resolve-robotics-uri
+        uri = self.model_path if self.custom_package_dir else model_name
+        package_dirs = [self.custom_package_dir] if self.custom_package_dir else []
+        try:
+            self.model_path = str(
+                resolve_robotics_uri_py.resolve_robotics_uri(uri, package_dirs=package_dirs)
             )
-            considered_model_joints = [
-                considered_joints[i] for i in self.model_joints_index
-            ]
+        except FileNotFoundError as e:
+            print(f"MeshcatProvider: Unable to resolve the model {uri}. {e}")
+            if not self.custom_package_dir:
+                self.model_path = ""
+            return False
 
-            model_loader.loadReducedModelFromFile(
-                self.model_path,
-                considered_model_joints,
-                "urdf",
-                [self.custom_package_dir],
-            )
-        else:
-            self.model_path = resolve_model_path(model_name)
-
-            if self.model_path is None:
-                # Fallback for log metadata that only carries a bare model folder name.
-                for folder in get_model_path_from_envs(self.env_list):
-                    if check_if_model_exist(folder, model_name):
-                        folder_model_path = folder / Path(model_name)
-                        model_filenames = [
-                            folder_model_path / Path(f)
-                            for f in os.listdir(folder_model_path.absolute())
-                            if re.search(r"[a-zA-Z0-9_]*\.urdf", f)
-                        ]
-
-                        if model_filenames:
-                            self.model_path = str(model_filenames[0].resolve())
-                            break
-
-            if self.model_path is None:
-                print(
-                    "MeshcatProvider: Unable to resolve model "
-                    + model_name
-                    + " via resolve_robotics_uri or environment folders."
-                )
-                return False
-
-            self.model_joints_index = find_model_joints(
-                self.model_path, considered_joints
-            )
-            considered_model_joints = [
-                considered_joints[i] for i in self.model_joints_index
-            ]
-            model_loader.loadReducedModelFromFile(
-                self.model_path, considered_model_joints
-            )
+        self.model_joints_index = find_model_joints(self.model_path, considered_joints)
+        considered_model_joints = [considered_joints[i] for i in self.model_joints_index]
+        model_loader.loadReducedModelFromFile(
+            self.model_path, considered_model_joints, "urdf", package_dirs
+        )
 
         if not model_loader.isValid():
             return False

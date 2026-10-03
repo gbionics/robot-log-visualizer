@@ -148,6 +148,13 @@ class MatfileSignalProvider(SignalProvider):
                         self.robot_name = "".join(chr(c[0]) for c in robot_name_ref)
                     except:
                         pass
+
+            version_ref = file.get("version")
+            if isinstance(version_ref, h5py.Dataset):
+                try:
+                    self.version = "".join(chr(c) for c in np.ravel(version_ref[()]))
+                except (TypeError, ValueError):
+                    pass
             self.index = 0
 
         # Pre-compute relative timestamps for binary search in run()
