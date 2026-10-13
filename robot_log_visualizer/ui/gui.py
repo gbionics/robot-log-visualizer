@@ -433,10 +433,6 @@ class RobotViewerMainWindow(QtWidgets.QMainWindow):
         self.ui.pauseButton.setEnabled(False)
         self.ui.startButton.setEnabled(True)
 
-        for video_item in self.video_items:
-            if video_item.media_loaded:
-                video_item.media_player.pause()
-
         self.signal_provider.state = PeriodicThreadState.pause
         self.meshcat_provider.state = PeriodicThreadState.pause
 
@@ -626,14 +622,11 @@ class RobotViewerMainWindow(QtWidgets.QMainWindow):
         for video_item in self.video_items:
             if not video_item.media_loaded:
                 continue
-            duration = video_item.media_player.duration()
             if video_item.start_time is not None:
-                position = max(0, int(round((current_time - video_item.start_time) * 1000)))
-                if duration > 0:
-                    position = min(position, duration)
+                position = max(0.0, current_time - video_item.start_time)
             else:
-                position = int(dataset_percentage * duration)
-            video_item.media_player.setPosition(position)
+                position = dataset_percentage * video_item.duration
+            video_item.set_time(position)
 
     def __video_start_time(self, video_label):
         """Time of the first frame of a video stored by the YarpRobotLoggerDevice.
@@ -690,15 +683,7 @@ class RobotViewerMainWindow(QtWidgets.QMainWindow):
         # release multimedia resources explicitly to avoid late callbacks
         # while closing
         for video_item in self.video_items:
-            media_player = getattr(video_item, "media_player", None)
-            if media_player is not None:
-                if video_item.media_loaded:
-                    media_player.stop()
-                try:
-                    media_player.setVideoOutput(None)
-                except Exception:
-                    pass
-                media_player.deleteLater()
+            video_item.release()
             video_item.deleteLater()
         self.video_items.clear()
 
@@ -900,10 +885,8 @@ class RobotViewerMainWindow(QtWidgets.QMainWindow):
             )
             self.logger.write_to_log("Video '" + video_filename + "' opened.")
 
-        # pause all the videos
-        for video_item in self.video_items:
-            if video_item.media_loaded:
-                video_item.media_player.pause()
+        # show the first frame of the videos
+        self.__set_videos_position(0.0)
 
         self.meshcat_provider.state = PeriodicThreadState.running
         self.ui.actionRealtime_Connect.setEnabled(False)
