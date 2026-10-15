@@ -40,12 +40,13 @@ from robot_log_visualizer.utils.utils import (ColorPalette,
 
 pyqtSlot = Slot
 
-# first bipedal-locomotion-framework release storing the robot model as a resolve-robotics-uri
-MIN_ROBOT_MODEL_URI_VERSION = (0, 28, 0)
+# first log format storing the robot model as a resolve-robotics-uri, see
+# https://github.com/gbionics/bipedal-locomotion-framework/blob/master/devices/YarpRobotLoggerDevice/docs/log-format/README.md
+MIN_ROBOT_MODEL_URI_VERSION = (0, 1, 0)
 
 
 def parse_version(version):
-    """Return the (major, minor, patch) tuple of a git describe version, None if not valid."""
+    """Return the (major, minor, patch) tuple of a log format version, None if not valid."""
     match = re.match(r"^v?(\d+)\.(\d+)\.(\d+)", version)
     return tuple(int(v) for v in match.groups()) if match else None
 
@@ -823,12 +824,12 @@ class RobotViewerMainWindow(QtWidgets.QMainWindow):
         self.meshcat_provider.set_signal_provider(self.signal_provider)
         if not self.__is_robot_model_available():
             self.logger.write_to_log(
-                "The file has been created with a version of bipedal-locomotion-framework "
-                "older than "
-                + ".".join(str(v) for v in MIN_ROBOT_MODEL_URI_VERSION)
-                + " (version: '"
+                "The file uses the log format v"
                 + self.signal_provider.version
-                + "'). The robot model is not loaded."
+                + ", where the robot model is not stored as a URI (it is stored from v"
+                + ".".join(str(v) for v in MIN_ROBOT_MODEL_URI_VERSION)
+                + "). The robot model is not loaded, it can be set manually before opening "
+                "the file."
             )
         elif not self.meshcat_provider.load_model(
             self.signal_provider.joints_name, self.signal_provider.robot_name
@@ -913,7 +914,7 @@ class RobotViewerMainWindow(QtWidgets.QMainWindow):
         self.logger.write_to_log(
             "Robot name: '" + self.signal_provider.robot_name + "'."
         )
-        self.logger.write_to_log("Version: '" + self.signal_provider.version + "'.")
+        self.logger.write_to_log("Log format version: '" + self.signal_provider.version + "'.")
 
     def __is_robot_model_available(self):
         # in mat files, the robot name is a resolve-robotics-uri only from MIN_ROBOT_MODEL_URI_VERSION

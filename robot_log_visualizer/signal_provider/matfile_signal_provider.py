@@ -12,6 +12,9 @@ from robot_log_visualizer.signal_provider.signal_provider import (
 )
 from robot_log_visualizer.utils.utils import PeriodicThreadState
 
+# format version of the logs that do not store the version
+LEGACY_LOG_FORMAT_VERSION = "0.0.1"
+
 
 class MatfileSignalProvider(SignalProvider):
     def __init__(self, period: float, signal_root_name: str):
@@ -149,6 +152,9 @@ class MatfileSignalProvider(SignalProvider):
                     except:
                         pass
 
+            # the files without version follow the format v0.0.1, see
+            # https://github.com/gbionics/bipedal-locomotion-framework/blob/master/devices/YarpRobotLoggerDevice/docs/log-format/README.md
+            self.version = LEGACY_LOG_FORMAT_VERSION
             version_ref = file.get("version")
             if isinstance(version_ref, h5py.Dataset):
                 try:
