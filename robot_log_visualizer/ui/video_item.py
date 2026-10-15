@@ -21,6 +21,11 @@ DEPTH_RANGE_M = (0.2, 5.0)
 DEPTH_COLORMAP = "turbo"
 
 
+def depth_lookup_table() -> np.ndarray:
+    """RGB lookup table (256 x 3, uint8) of the colormap used for depth images."""
+    return pg.colormap.get(DEPTH_COLORMAP).getLookupTable(nPts=256, alpha=False)
+
+
 class _VideoDecoder(QThread):
     """Decode the frame shown at a requested time without blocking the GUI thread."""
 
@@ -124,12 +129,13 @@ class _VideoDecoder(QThread):
         return max(1, int(width * scale)), max(1, int(height * scale))
 
 
-class _FrameView(QWidget):
+class FrameView(QWidget):
     resized = Signal(int, int)
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, smooth: bool = True):
         super().__init__(parent)
         self._image = None
+        self._smooth = smooth
         self.setMinimumSize(1, 1)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
 
@@ -150,11 +156,11 @@ class _FrameView(QWidget):
         size = self._image.size().scaled(self.size(), Qt.KeepAspectRatio)
         rect = QRect(0, 0, size.width(), size.height())
         rect.moveCenter(self.rect().center())
-        painter.setRenderHint(QPainter.SmoothPixmapTransform)
+        painter.setRenderHint(QPainter.SmoothPixmapTransform, self._smooth)
         painter.drawImage(rect, self._image)
 
 
-def _depth_colorbar(lut: np.ndarray) -> QWidget:
+def colorbar(lut: np.ndarray, low_label: str, high_label: str) -> QWidget:
     widget = QWidget()
     layout = QHBoxLayout(widget)
     layout.setContentsMargins(0, 0, 0, 0)
@@ -167,9 +173,9 @@ def _depth_colorbar(lut: np.ndarray) -> QWidget:
     bar.setFixedHeight(14)
     bar.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
 
-    layout.addWidget(QLabel(f"{DEPTH_RANGE_M[0]:.1f} m"))
+    layout.addWidget(QLabel(low_label))
     layout.addWidget(bar, 1)
-    layout.addWidget(QLabel(f"{DEPTH_RANGE_M[1]:.1f} m  (black: no data)"))
+    layout.addWidget(QLabel(high_label))
     return widget
 
 
@@ -184,7 +190,7 @@ class VideoItem(QFrame):
         self.duration = 0.0
         self._decoder = None
 
-        self._view = _FrameView(self)
+        self._view = FrameView(self)
         layout = QVBoxLayout(self)
         layout.addWidget(self._view, 1)
 
@@ -202,8 +208,14 @@ class VideoItem(QFrame):
         depth_lut = None
         pixel_format = stream.codec_context.format
         if pixel_format is not None and pixel_format.name.startswith("gray16"):
-            depth_lut = pg.colormap.get(DEPTH_COLORMAP).getLookupTable(nPts=256, alpha=False)
-            layout.addWidget(_depth_colorbar(depth_lut))
+            depth_lut = depth_lookup_table()
+            layout.addWidget(
+                colorbar(
+                    depth_lut,
+                    f"{DEPTH_RANGE_M[0]:.1f} m",
+                    f"{DEPTH_RANGE_M[1]:.1f} m  (black: no data)",
+                )
+            )
 
         self._decoder = _VideoDecoder(container, stream, depth_lut, self)
         self._decoder.frame_ready.connect(self._view.set_image)

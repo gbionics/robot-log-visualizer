@@ -28,6 +28,7 @@ from robot_log_visualizer.signal_provider.realtime_signal_provider import (
     ROBOT_REALTIME_KEY, RealtimeSignalProvider, are_deps_installed)
 from robot_log_visualizer.signal_provider.signal_provider import (
     ProviderType, SignalProvider)
+from robot_log_visualizer.ui.image_item import ImageItem, ImageLayout
 from robot_log_visualizer.ui.plot_item import PlotItem
 from robot_log_visualizer.ui.text_logging import TextLoggingItem
 # QtDesigner generated classes
@@ -216,6 +217,8 @@ class RobotViewerMainWindow(QtWidgets.QMainWindow):
 
         self.plot_items = []
         self.video_items = []
+        # images rendered from logged signals, indexed by the path of the signal
+        self.image_items = {}
         self.visualized_3d_points = set()
         self.visualized_3d_trajectories = set()
         self.visualized_3d_arrows = set()
@@ -403,6 +406,7 @@ class RobotViewerMainWindow(QtWidgets.QMainWindow):
 
         self.signal_provider.set_dataset_percentage(dataset_percentage)
         self.ui.timeLabel.setText(f"{self.signal_provider.current_time:.2f}")
+        self.__update_image_items()
 
         # Defer heavy work (video seek, text-log highlight) so the slider
         # stays responsive while dragging.  The deferred work is performed
@@ -618,6 +622,8 @@ class RobotViewerMainWindow(QtWidgets.QMainWindow):
         If the time of the first frame of a video is known, the position is computed from the
         time, otherwise the video is assumed to span the entire dataset.
         """
+        self.__update_image_items()
+
         current_time = self.signal_provider.initial_time + self.signal_provider.current_time
         for video_item in self.video_items:
             if not video_item.media_loaded:
@@ -627,6 +633,10 @@ class RobotViewerMainWindow(QtWidgets.QMainWindow):
             else:
                 position = dataset_percentage * video_item.duration
             video_item.set_time(position)
+
+    def __update_image_items(self):
+        for image_item in self.image_items.values():
+            image_item.refresh()
 
     def __video_start_time(self, video_label):
         """Time of the first frame of a video stored by the YarpRobotLoggerDevice.
@@ -686,6 +696,11 @@ class RobotViewerMainWindow(QtWidgets.QMainWindow):
             video_item.release()
             video_item.deleteLater()
         self.video_items.clear()
+
+        for image_item in self.image_items.values():
+            image_item.release()
+            image_item.deleteLater()
+        self.image_items.clear()
 
         # Disable realtime connection
         if self.realtime_connection_enabled:
@@ -1098,6 +1113,8 @@ class RobotViewerMainWindow(QtWidgets.QMainWindow):
         use_as_base_orientation_str = "Use as base orientation"
         dont_use_as_base_position_str = "Don't use as base position"
         dont_use_as_base_orientation_str = "Don't use as base orientation"
+        render_as_image_str = "Render as image"
+        remove_image_str = "Remove the image"
         selected_base_color = QtGui.QColor(255, 0, 0, 127)
         deselected_base_color = QtGui.QColor(0, 0, 0, 0)
 
@@ -1152,6 +1169,24 @@ class RobotViewerMainWindow(QtWidgets.QMainWindow):
             else:
                 menu.addAction(add_3d_arrow_str)
 
+        # signals named image (e.g. the depth seen by a policy) can be rendered as a video
+        image_layout = None
+        if item_key in self.image_items:
+            menu.addSeparator()
+            menu.addAction(remove_image_str)
+        elif re.search(r"image|img", item.text(0), re.IGNORECASE):
+            image_layout = ImageLayout.from_signal(
+                item_size, [item.child(i).text(0) for i in range(item_size)]
+            )
+            if image_layout is not None:
+                menu.addSeparator()
+                menu.addAction(
+                    f"{render_as_image_str} ({image_layout.height}x{image_layout.width})"
+                )
+
+        if menu.isEmpty():
+            return
+
         # show the menu
         action = menu.exec_(self.ui.variableTreeWidget.mapToGlobal(item_position))
         if action is None:
@@ -1188,6 +1223,12 @@ class RobotViewerMainWindow(QtWidgets.QMainWindow):
                 self.visualized_3d_arrows.add(item_key)
             else:
                 raise ValueError("Unknown action")
+
+        if action.text().startswith(render_as_image_str):
+            self.__add_image_item(item, item_path, image_layout)
+
+        if action.text() == remove_image_str:
+            self.__remove_image_item(item, item_key)
 
         if action.text() == remove_3d_point_str:
             self.meshcat_provider.unregister_3d_point(item_key)
@@ -1266,6 +1307,41 @@ class RobotViewerMainWindow(QtWidgets.QMainWindow):
 
         # we update the robot state path
         self.signal_provider.robot_state_path = self.robot_state_path
+
+    def __add_image_item(self, item, item_path, image_layout):
+        item_key = "/".join(item_path)
+
+        # In real time mode, add the signal to the provider buffer
+        if (
+            self.signal_provider
+            and self.signal_provider.provider_type == ProviderType.REALTIME
+        ):
+            signal_name = f"{ROBOT_REALTIME_KEY}::" + "::".join(item_path)
+            self.signal_provider.add_signals_to_buffer([signal_name])
+
+        image_item = ImageItem(self.signal_provider, item_path, image_layout)
+        self.image_items[item_key] = image_item
+
+        label = "/".join(item_path[-3:])
+        tab_index = self.ui.meshcatAndVideoTab.addTab(
+            image_item, get_icon("videocam-outline.svg"), label
+        )
+        self.ui.meshcatAndVideoTab.setTabToolTip(tab_index, item_key)
+        self.ui.meshcatAndVideoTab.setCurrentIndex(tab_index)
+
+        item.setBackground(0, QtGui.QBrush(QtGui.QColor(0, 120, 255, 70)))
+        self.logger.write_to_log(
+            f"Rendering '{item_key}' as a {image_layout.height}x{image_layout.width} image."
+        )
+
+    def __remove_image_item(self, item, item_key):
+        image_item = self.image_items.pop(item_key)
+        tab_index = self.ui.meshcatAndVideoTab.indexOf(image_item)
+        if tab_index >= 0:
+            self.ui.meshcatAndVideoTab.removeTab(tab_index)
+        image_item.release()
+        image_item.deleteLater()
+        item.setBackground(0, QtGui.QBrush(QtGui.QColor(0, 0, 0, 0)))
 
     def get_item_from_path(self, path):
         item = self.ui.variableTreeWidget.topLevelItem(0)
