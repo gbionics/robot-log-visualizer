@@ -1,4 +1,5 @@
 # Copyright (C) 2022 Istituto Italiano di Tecnologia (IIT). All rights reserved.
+# Copyright (C) 2026 Generative Bionics S.R.L. All rights reserved.
 # This software may be modified and distributed under the terms of the
 # Released under the terms of the BSD 3-Clause License
 
@@ -27,6 +28,7 @@ from robot_log_visualizer.signal_provider.realtime_signal_provider import (
     ROBOT_REALTIME_KEY, RealtimeSignalProvider, are_deps_installed)
 from robot_log_visualizer.signal_provider.signal_provider import (
     ProviderType, SignalProvider)
+from robot_log_visualizer.ui.image_item import ImageItem, ImageLayout
 from robot_log_visualizer.ui.plot_item import PlotItem
 from robot_log_visualizer.ui.text_logging import TextLoggingItem
 # QtDesigner generated classes
@@ -37,6 +39,16 @@ from robot_log_visualizer.utils.utils import (ColorPalette,
                                               RobotStatePath)
 
 pyqtSlot = Slot
+
+# first log format storing the robot model as a resolve-robotics-uri, see
+# https://github.com/gbionics/bipedal-locomotion-framework/blob/master/devices/YarpRobotLoggerDevice/docs/log-format/README.md
+MIN_ROBOT_MODEL_URI_VERSION = (0, 1, 0)
+
+
+def parse_version(version):
+    """Return the (major, minor, patch) tuple of a log format version, None if not valid."""
+    match = re.match(r"^v?(\d+)\.(\d+)\.(\d+)", version)
+    return tuple(int(v) for v in match.groups()) if match else None
 
 
 class SetRobotModelDialog(QtWidgets.QDialog):
@@ -206,6 +218,8 @@ class RobotViewerMainWindow(QtWidgets.QMainWindow):
 
         self.plot_items = []
         self.video_items = []
+        # images rendered from logged signals, indexed by the path of the signal
+        self.image_items = {}
         self.visualized_3d_points = set()
         self.visualized_3d_trajectories = set()
         self.visualized_3d_arrows = set()
@@ -344,12 +358,7 @@ class RobotViewerMainWindow(QtWidgets.QMainWindow):
                     self.find_text_log_index(self.get_text_log_item_path())
                 )
 
-                # for every video item we set the instant
-                for video_item in self.video_items:
-                    if video_item.media_loaded:
-                        video_item.media_player.setPosition(
-                            int(dataset_percentage * video_item.media_player.duration())
-                        )
+                self.__set_videos_position(dataset_percentage)
 
                 # update the time slider
                 self.ui.timeSlider.setValue(new_index)
@@ -366,12 +375,7 @@ class RobotViewerMainWindow(QtWidgets.QMainWindow):
                     self.find_text_log_index(self.get_text_log_item_path())
                 )
 
-                # for every video item we set the instant
-                for video_item in self.video_items:
-                    if video_item.media_loaded:
-                        video_item.media_player.setPosition(
-                            int(dataset_percentage * video_item.media_player.duration())
-                        )
+                self.__set_videos_position(dataset_percentage)
 
                 self.ui.timeSlider.setValue(new_index)
                 self.slider_pressed = False
@@ -403,6 +407,7 @@ class RobotViewerMainWindow(QtWidgets.QMainWindow):
 
         self.signal_provider.set_dataset_percentage(dataset_percentage)
         self.ui.timeLabel.setText(f"{self.signal_provider.current_time:.2f}")
+        self.__update_image_items()
 
         # Defer heavy work (video seek, text-log highlight) so the slider
         # stays responsive while dragging.  The deferred work is performed
@@ -412,13 +417,9 @@ class RobotViewerMainWindow(QtWidgets.QMainWindow):
         index = int(self.ui.timeSlider.value())
         dataset_percentage = float(index) / float(self.ui.timeSlider.maximum())
 
-        for video_item in self.video_items:
-            if video_item.media_loaded:
-                video_item.media_player.setPosition(
-                    int(dataset_percentage * video_item.media_player.duration())
-                )
-
         self.signal_provider.set_dataset_percentage(dataset_percentage)
+        self.__set_videos_position(dataset_percentage)
+
         self.ui.timeLabel.setText(f"{self.signal_provider.current_time:.2f}")
         self.text_logger.highlight_cell(
             self.find_text_log_index(self.get_text_log_item_path())
@@ -436,10 +437,6 @@ class RobotViewerMainWindow(QtWidgets.QMainWindow):
     def pauseButton_on_click(self):
         self.ui.pauseButton.setEnabled(False)
         self.ui.startButton.setEnabled(True)
-
-        for video_item in self.video_items:
-            if video_item.media_loaded:
-                video_item.media_player.pause()
 
         self.signal_provider.state = PeriodicThreadState.pause
         self.meshcat_provider.state = PeriodicThreadState.pause
@@ -618,12 +615,49 @@ class RobotViewerMainWindow(QtWidgets.QMainWindow):
         # Only seek videos that are loaded
         slider_max = self.ui.timeSlider.maximum()
         if slider_max > 0:
-            video_percentage = float(index) / float(slider_max)
-            for video_item in self.video_items:
-                if video_item.media_loaded:
-                    video_item.media_player.setPosition(
-                        int(video_percentage * video_item.media_player.duration())
-                    )
+            self.__set_videos_position(float(index) / float(slider_max))
+
+    def __set_videos_position(self, dataset_percentage):
+        """Seek the videos to the current instant of the dataset.
+
+        If the time of the first frame of a video is known, the position is computed from the
+        time, otherwise the video is assumed to span the entire dataset.
+        """
+        self.__update_image_items()
+
+        current_time = self.signal_provider.initial_time + self.signal_provider.current_time
+        for video_item in self.video_items:
+            if not video_item.media_loaded:
+                continue
+            if video_item.start_time is not None:
+                position = max(0.0, current_time - video_item.start_time)
+            else:
+                position = dataset_percentage * video_item.duration
+            video_item.set_time(position)
+
+    def __update_image_items(self):
+        for image_item in self.image_items.values():
+            image_item.refresh()
+
+    def __video_start_time(self, video_label):
+        """Time of the first frame of a video stored by the YarpRobotLoggerDevice.
+
+        The frame indices of the video `<prefix>_<camera>_<type>` are stored in the channel
+        camera::<camera>::<type>. The index restarts from zero in each video.
+        """
+        camera, _, image_type = video_label.rpartition("_")
+        root = list(self.signal_provider.data.keys())[0]
+        try:
+            channel = self.signal_provider.data[root]["camera"][camera][image_type]
+            indices = np.atleast_1d(np.asarray(channel["data"])).reshape(-1)
+            timestamps = np.atleast_1d(np.asarray(channel["timestamps"])).reshape(-1)
+        except (KeyError, TypeError):
+            return None
+
+        first = np.flatnonzero(indices == 0)
+        if first.size == 0 or first[0] >= timestamps.size:
+            return None
+        return float(timestamps[first[0]])
 
     def closeEvent(self, event):
         # ensure update callbacks are not triggered while tearing down the UI
@@ -660,17 +694,14 @@ class RobotViewerMainWindow(QtWidgets.QMainWindow):
         # release multimedia resources explicitly to avoid late callbacks
         # while closing
         for video_item in self.video_items:
-            media_player = getattr(video_item, "media_player", None)
-            if media_player is not None:
-                if video_item.media_loaded:
-                    media_player.stop()
-                try:
-                    media_player.setVideoOutput(None)
-                except Exception:
-                    pass
-                media_player.deleteLater()
+            video_item.release()
             video_item.deleteLater()
         self.video_items.clear()
+
+        for image_item in self.image_items.values():
+            image_item.release()
+            image_item.deleteLater()
+        self.image_items.clear()
 
         # Disable realtime connection
         if self.realtime_connection_enabled:
@@ -791,7 +822,16 @@ class RobotViewerMainWindow(QtWidgets.QMainWindow):
 
         # load the model and load the provider
         self.meshcat_provider.set_signal_provider(self.signal_provider)
-        if not self.meshcat_provider.load_model(
+        if not self.__is_robot_model_available():
+            self.logger.write_to_log(
+                "The file uses the log format v"
+                + self.signal_provider.version
+                + ", where the robot model is not stored as a URI (it is stored from v"
+                + ".".join(str(v) for v in MIN_ROBOT_MODEL_URI_VERSION)
+                + "). The robot model is not loaded, it can be set manually before opening "
+                "the file."
+            )
+        elif not self.meshcat_provider.load_model(
             self.signal_provider.joints_name, self.signal_provider.robot_name
         ):
             # if not loaded we print an error but we continue
@@ -843,23 +883,26 @@ class RobotViewerMainWindow(QtWidgets.QMainWindow):
         video_filenames = [
             str(pathlib.Path(file_name).parent.absolute() / pathlib.Path(f))
             for f in os.listdir(pathlib.Path(file_name).parent.absolute())
-            if re.search(prefix + r"_[a-zA-Z0-9_]*\.mp4$", f)
+            if re.search(prefix + r"_[a-zA-Z0-9_]*\.(mp4|mkv)$", f)
         ]
 
         # for every video we create a video item and we append it to the tab
         for video_filename in video_filenames:
             video_prefix, _, _ = pathlib.Path(video_filename).name.rpartition(".")
             video_label = str(video_prefix).replace(prefix + "_", "")
-            self.video_items.append(VideoItem(video_filename=video_filename))
+            self.video_items.append(
+                VideoItem(
+                    video_filename=video_filename,
+                    start_time=self.__video_start_time(video_label),
+                )
+            )
             self.ui.meshcatAndVideoTab.addTab(
                 self.video_items[-1], get_icon("videocam-outline.svg"), video_label
             )
             self.logger.write_to_log("Video '" + video_filename + "' opened.")
 
-        # pause all the videos
-        for video_item in self.video_items:
-            if video_item.media_loaded:
-                video_item.media_player.pause()
+        # show the first frame of the videos
+        self.__set_videos_position(0.0)
 
         self.meshcat_provider.state = PeriodicThreadState.running
         self.ui.actionRealtime_Connect.setEnabled(False)
@@ -870,6 +913,16 @@ class RobotViewerMainWindow(QtWidgets.QMainWindow):
         self.logger.write_to_log("File '" + file_name + "' opened.")
         self.logger.write_to_log(
             "Robot name: '" + self.signal_provider.robot_name + "'."
+        )
+        self.logger.write_to_log("Log format version: '" + self.signal_provider.version + "'.")
+
+    def __is_robot_model_available(self):
+        # in mat files, the robot name is a resolve-robotics-uri only from MIN_ROBOT_MODEL_URI_VERSION
+        version = parse_version(self.signal_provider.version)
+        return (
+            self.signal_provider.provider_type != ProviderType.OFFLINE
+            or (version is not None and version >= MIN_ROBOT_MODEL_URI_VERSION)
+            or bool(self.meshcat_provider.custom_package_dir)
         )
 
     def open_mat_file(self):
@@ -994,7 +1047,7 @@ class RobotViewerMainWindow(QtWidgets.QMainWindow):
                         arrow_scaling_value,
                     )
 
-            else:
+            elif self.__is_robot_model_available():
                 self.meshcat_provider.load_model(
                     self.signal_provider.joints_name,
                     self.signal_provider.robot_name,
@@ -1061,6 +1114,8 @@ class RobotViewerMainWindow(QtWidgets.QMainWindow):
         use_as_base_orientation_str = "Use as base orientation"
         dont_use_as_base_position_str = "Don't use as base position"
         dont_use_as_base_orientation_str = "Don't use as base orientation"
+        render_as_image_str = "Render as image"
+        remove_image_str = "Remove the image"
         selected_base_color = QtGui.QColor(255, 0, 0, 127)
         deselected_base_color = QtGui.QColor(0, 0, 0, 0)
 
@@ -1115,6 +1170,24 @@ class RobotViewerMainWindow(QtWidgets.QMainWindow):
             else:
                 menu.addAction(add_3d_arrow_str)
 
+        # signals named image (e.g. the depth seen by a policy) can be rendered as a video
+        image_layout = None
+        if item_key in self.image_items:
+            menu.addSeparator()
+            menu.addAction(remove_image_str)
+        elif re.search(r"image|img", item.text(0), re.IGNORECASE):
+            image_layout = ImageLayout.from_signal(
+                item_size, [item.child(i).text(0) for i in range(item_size)]
+            )
+            if image_layout is not None:
+                menu.addSeparator()
+                menu.addAction(
+                    f"{render_as_image_str} ({image_layout.height}x{image_layout.width})"
+                )
+
+        if menu.isEmpty():
+            return
+
         # show the menu
         action = menu.exec_(self.ui.variableTreeWidget.mapToGlobal(item_position))
         if action is None:
@@ -1151,6 +1224,12 @@ class RobotViewerMainWindow(QtWidgets.QMainWindow):
                 self.visualized_3d_arrows.add(item_key)
             else:
                 raise ValueError("Unknown action")
+
+        if action.text().startswith(render_as_image_str):
+            self.__add_image_item(item, item_path, image_layout)
+
+        if action.text() == remove_image_str:
+            self.__remove_image_item(item, item_key)
 
         if action.text() == remove_3d_point_str:
             self.meshcat_provider.unregister_3d_point(item_key)
@@ -1229,6 +1308,41 @@ class RobotViewerMainWindow(QtWidgets.QMainWindow):
 
         # we update the robot state path
         self.signal_provider.robot_state_path = self.robot_state_path
+
+    def __add_image_item(self, item, item_path, image_layout):
+        item_key = "/".join(item_path)
+
+        # In real time mode, add the signal to the provider buffer
+        if (
+            self.signal_provider
+            and self.signal_provider.provider_type == ProviderType.REALTIME
+        ):
+            signal_name = f"{ROBOT_REALTIME_KEY}::" + "::".join(item_path)
+            self.signal_provider.add_signals_to_buffer([signal_name])
+
+        image_item = ImageItem(self.signal_provider, item_path, image_layout)
+        self.image_items[item_key] = image_item
+
+        label = "/".join(item_path[-3:])
+        tab_index = self.ui.meshcatAndVideoTab.addTab(
+            image_item, get_icon("videocam-outline.svg"), label
+        )
+        self.ui.meshcatAndVideoTab.setTabToolTip(tab_index, item_key)
+        self.ui.meshcatAndVideoTab.setCurrentIndex(tab_index)
+
+        item.setBackground(0, QtGui.QBrush(QtGui.QColor(0, 120, 255, 70)))
+        self.logger.write_to_log(
+            f"Rendering '{item_key}' as a {image_layout.height}x{image_layout.width} image."
+        )
+
+    def __remove_image_item(self, item, item_key):
+        image_item = self.image_items.pop(item_key)
+        tab_index = self.ui.meshcatAndVideoTab.indexOf(image_item)
+        if tab_index >= 0:
+            self.ui.meshcatAndVideoTab.removeTab(tab_index)
+        image_item.release()
+        image_item.deleteLater()
+        item.setBackground(0, QtGui.QBrush(QtGui.QColor(0, 0, 0, 0)))
 
     def get_item_from_path(self, path):
         item = self.ui.variableTreeWidget.topLevelItem(0)

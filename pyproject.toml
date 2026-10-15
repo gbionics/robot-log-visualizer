@@ -47,6 +47,7 @@ dependencies = [
     "resolve-robotics-uri-py",
     "h5py",
     "pyqtgraph",
+    "av",
 ]
 dynamic = ["version"]
 
@@ -85,6 +86,7 @@ pyqt = "*"
 pyqtwebengine = "*"
 pyside2 = "*"
 pyqtgraph = "*"
+av = "*"
 matplotlib = "*"
 h5py = "*"
 gst-plugins-good = "*"
