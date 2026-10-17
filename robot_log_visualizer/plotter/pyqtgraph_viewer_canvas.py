@@ -32,6 +32,9 @@ class PyQtGraphViewerCanvas(QtWidgets.QWidget):
     #: Default diameter of the marker drawn on a selected point.
     DEFAULT_MARKER_SIZE: int = 8
 
+    #: Emitted when the plot is clicked.
+    sig_clicked = QtCore.Signal()
+
     def __init__(
         self,
         parent: QtWidgets.QWidget | None,
@@ -321,11 +324,16 @@ class PyQtGraphViewerCanvas(QtWidgets.QWidget):
 
     def _on_mouse_click(self, event) -> None:  # noqa: N802
         """Handle a left‑click: select or unselect the nearest data point."""
+        self.sig_clicked.emit()
+
         if event.button() != QtCore.Qt.MouseButton.LeftButton:
             return  # ignore other buttons
 
         # Disable point selection / labels in realtime mode
-        if self._signal_provider.provider_type == ProviderType.REALTIME:
+        if (
+            self._signal_provider is None
+            or self._signal_provider.provider_type == ProviderType.REALTIME
+        ):
             return
 
         # Scene → data coordinates

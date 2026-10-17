@@ -17,8 +17,9 @@ from pyqtconsole.console import PythonConsole
 from qtpy import QtWebEngineWidgets  # noqa: F401
 from qtpy import QtGui, QtWidgets
 from qtpy.QtCore import QMutex, QMutexLocker, Qt, QTimer, QUrl, Slot
-from qtpy.QtWidgets import (QDialog, QDialogButtonBox, QFileDialog, QLineEdit,
-                            QToolButton, QTreeWidgetItem, QVBoxLayout)
+from qtpy.QtWidgets import (QDialog, QDialogButtonBox, QFileDialog,
+                            QHBoxLayout, QLineEdit, QToolButton,
+                            QTreeWidgetItem, QVBoxLayout, QWidget)
 
 from robot_log_visualizer.robot_visualizer.meshcat_provider import \
     MeshcatProvider
@@ -28,11 +29,14 @@ from robot_log_visualizer.signal_provider.realtime_signal_provider import (
     ROBOT_REALTIME_KEY, RealtimeSignalProvider, are_deps_installed)
 from robot_log_visualizer.signal_provider.signal_provider import (
     ProviderType, SignalProvider)
+from robot_log_visualizer.ui.grid_layout import (GridLayoutButton,
+                                                 grid_layout_icon)
 from robot_log_visualizer.ui.image_item import ImageItem, ImageLayout
-from robot_log_visualizer.ui.plot_item import PlotItem
+from robot_log_visualizer.ui.plot_item import PlotGridTab
 from robot_log_visualizer.ui.text_logging import TextLoggingItem
 # QtDesigner generated classes
 from robot_log_visualizer.ui.ui_loader import load_ui
+from robot_log_visualizer.ui.video_grid import VideoGridTab
 from robot_log_visualizer.ui.video_item import VideoItem
 from robot_log_visualizer.utils.utils import (ColorPalette,
                                               PeriodicThreadState,
@@ -213,11 +217,25 @@ class RobotViewerMainWindow(QtWidgets.QMainWindow):
 
         self.tool_button = QToolButton()
         self.tool_button.setText("+")
-        self.ui.tabPlotWidget.setCornerWidget(self.tool_button)
+        self.tool_button.setToolTip("Add a plot tab")
         self.tool_button.clicked.connect(self.toolButton_on_click)
 
-        self.plot_items = []
+        # selector of the grid of plots shown in the current tab
+        self.plot_layout_button = GridLayoutButton("Split the current tab in multiple plots")
+        self.plot_layout_button.layout_selected.connect(self.plotLayout_on_select)
+
+        corner_widget = QWidget()
+        corner_layout = QHBoxLayout(corner_widget)
+        corner_layout.setContentsMargins(0, 0, 0, 0)
+        corner_layout.setSpacing(2)
+        corner_layout.addWidget(self.plot_layout_button)
+        corner_layout.addWidget(self.tool_button)
+        self.ui.tabPlotWidget.setCornerWidget(corner_widget)
+
+        self.plot_tabs = []
         self.video_items = []
+        # grid showing the videos chosen by the user, created when a dataset with videos is opened
+        self.video_grid = None
         # images rendered from logged signals, indexed by the path of the signal
         self.image_items = {}
         self.visualized_3d_points = set()
@@ -389,14 +407,38 @@ class RobotViewerMainWindow(QtWidgets.QMainWindow):
                     self.ui.pauseButton.click()
 
     def toolButton_on_click(self):
-        self.plot_items.append(PlotItem(period=self.animation_period))
-        self.plot_items[-1].set_signal_provider(self.signal_provider)
-        self.ui.tabPlotWidget.addTab(self.plot_items[-1], "Plot")
+        plot_tab = PlotGridTab(self.animation_period, self.signal_provider)
+        plot_tab.active_plot_changed.connect(
+            lambda plot_item, plot_tab=plot_tab: self.plotGrid_on_activePlotChanged(
+                plot_tab, plot_item
+            )
+        )
+        self.plot_tabs.append(plot_tab)
+        self.ui.tabPlotWidget.addTab(plot_tab, "Plot")
 
         if self.ui.tabPlotWidget.count() == 1:
             self.ui.tabPlotWidget.setTabsClosable(False)
         else:
             self.ui.tabPlotWidget.setTabsClosable(True)
+
+    def __current_plot_tab(self):
+        index = self.ui.tabPlotWidget.currentIndex()
+        if 0 <= index < len(self.plot_tabs):
+            return self.plot_tabs[index]
+        return None
+
+    def plotLayout_on_select(self, rows, cols):
+        plot_tab = self.__current_plot_tab()
+        if plot_tab is None:
+            return
+        plot_tab.set_shape(rows, cols)
+        if self.signal_provider is not None:
+            for plot_item in plot_tab.visible_plot_items:
+                plot_item.canvas.update_vline_value(self.signal_provider.current_time)
+
+    def plotGrid_on_activePlotChanged(self, plot_tab, plot_item):
+        if plot_tab is self.__current_plot_tab():
+            self.__select_plotted_signals_in_tree(plot_item)
 
     def timeSlider_on_pressed(self):
         self.slider_pressed = True
@@ -450,8 +492,8 @@ class RobotViewerMainWindow(QtWidgets.QMainWindow):
         self.logger.write_to_log(f"Playback speed set to {speed}x.")
 
     def plotTabCloseButton_on_click(self, index):
-        self.plot_items[index].canvas.quit_animation()
-        del self.plot_items[index]
+        self.plot_tabs[index].quit_animation()
+        del self.plot_tabs[index]
         if self.ui.tabPlotWidget.count() == 1:
             self.ui.tabPlotWidget.setTabsClosable(False)
         self.ui.tabPlotWidget.removeTab(index)
@@ -497,9 +539,7 @@ class RobotViewerMainWindow(QtWidgets.QMainWindow):
             "legends": legends,
         }
 
-        self.plot_items[self.ui.tabPlotWidget.currentIndex()].canvas.update_plots(
-            paths, legends
-        )
+        self.__current_plot_tab().active_plot.canvas.update_plots(paths, legends)
 
     def find_text_log_index(self, path):
         if not path:
@@ -563,15 +603,21 @@ class RobotViewerMainWindow(QtWidgets.QMainWindow):
 
     def plotTabBar_currentChanged(self, index):
         # pause all the animations except the one that is selected, this is done to avoid the overhead of the animations
-        for i in range(len(self.plot_items)):
-            if i != index:
-                self.plot_items[i].canvas.pause_animation()
-            else:
-                self.plot_items[i].canvas.resume_animation()
+        for i, plot_tab in enumerate(self.plot_tabs):
+            plot_tab.set_animated(i == index)
 
+        plot_tab = self.__current_plot_tab()
+        if plot_tab is None:
+            return
+
+        self.plot_layout_button.set_current(*plot_tab.shape)
+
+        self.__select_plotted_signals_in_tree(plot_tab.active_plot)
+
+    def __select_plotted_signals_in_tree(self, plot_item):
         # clear the selection to prepare a new one
         self.ui.variableTreeWidget.clearSelection()
-        for active_path_str in self.plot_items[index].canvas._curves.keys():
+        for active_path_str in plot_item.canvas._curves.keys():
             path = active_path_str.split("/")
 
             # select the item in the tree from the path
@@ -598,12 +644,13 @@ class RobotViewerMainWindow(QtWidgets.QMainWindow):
         self.ui.timeSlider.setValue(index)
         self.ui.timeLabel.setText(f"{current_time:.2f}")
 
-        # Also push the current time to the active plot tab so the vline stays
+        # Also push the current time to the plots of the active tab so the vline stays
         # in sync with the selected index. This complements the canvas timer-
         # driven updates rather than replacing them.
-        active_tab = self.ui.tabPlotWidget.currentIndex()
-        if 0 <= active_tab < len(self.plot_items):
-            self.plot_items[active_tab].canvas.update_vline_value(current_time)
+        plot_tab = self.__current_plot_tab()
+        if plot_tab is not None:
+            for plot_item in plot_tab.visible_plot_items:
+                plot_item.canvas.update_vline_value(current_time)
 
         # Only update text log highlight if a text log entry is selected
         text_path = self.get_text_log_item_path()
@@ -669,8 +716,8 @@ class RobotViewerMainWindow(QtWidgets.QMainWindow):
                 pass
 
         # stop timers/animations before widgets disappear
-        for plot_item in self.plot_items:
-            plot_item.canvas.quit_animation()
+        for plot_tab in self.plot_tabs:
+            plot_tab.quit_animation()
 
         # stop the embedded Python console (it owns a QThread)
         self.pyconsole.close()
@@ -693,6 +740,8 @@ class RobotViewerMainWindow(QtWidgets.QMainWindow):
 
         # release multimedia resources explicitly to avoid late callbacks
         # while closing
+        if self.video_grid is not None:
+            self.video_grid.release()
         for video_item in self.video_items:
             video_item.release()
             video_item.deleteLater()
@@ -818,7 +867,8 @@ class RobotViewerMainWindow(QtWidgets.QMainWindow):
         self.signal_provider.register_update_index(self.update_index)
 
         # add signal provider to the plot items
-        self.plot_items[-1].set_signal_provider(self.signal_provider)
+        for plot_tab in self.plot_tabs:
+            plot_tab.set_signal_provider(self.signal_provider)
 
         # load the model and load the provider
         self.meshcat_provider.set_signal_provider(self.signal_provider)
@@ -887,6 +937,7 @@ class RobotViewerMainWindow(QtWidgets.QMainWindow):
         ]
 
         # for every video we create a video item and we append it to the tab
+        videos = []
         for video_filename in video_filenames:
             video_prefix, _, _ = pathlib.Path(video_filename).name.rpartition(".")
             video_label = str(video_prefix).replace(prefix + "_", "")
@@ -899,7 +950,18 @@ class RobotViewerMainWindow(QtWidgets.QMainWindow):
             self.ui.meshcatAndVideoTab.addTab(
                 self.video_items[-1], get_icon("videocam-outline.svg"), video_label
             )
+            videos.append((video_label, self.video_items[-1]))
             self.logger.write_to_log("Video '" + video_filename + "' opened.")
+
+        if videos and self.video_grid is None:
+            self.video_grid = VideoGridTab(videos)
+            # right after the meshcat tab
+            tab_index = self.ui.meshcatAndVideoTab.insertTab(
+                1, self.video_grid, grid_layout_icon(2, 2), "Video grid"
+            )
+            self.ui.meshcatAndVideoTab.setTabToolTip(
+                tab_index, "Show multiple videos side by side"
+            )
 
         # show the first frame of the videos
         self.__set_videos_position(0.0)
@@ -982,8 +1044,8 @@ class RobotViewerMainWindow(QtWidgets.QMainWindow):
         self.meshcat_provider.set_signal_provider(self.signal_provider)
         self.meshcat_provider.state = PeriodicThreadState.running
         self.meshcat_provider.start()
-        for plot in self.plot_items:
-            plot.set_signal_provider(self.signal_provider)
+        for plot_tab in self.plot_tabs:
+            plot_tab.set_signal_provider(self.signal_provider)
 
         # In realtime mode, the refresh button starts disabled until new metadata is available
         try:
