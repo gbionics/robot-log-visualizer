@@ -130,6 +130,7 @@ class _VideoDecoder(QThread):
 
 
 class FrameView(QWidget):
+    # emitted also when the view is shown, since the set of visible views may have changed
     resized = Signal(int, int)
 
     def __init__(self, parent=None, smooth: bool = True):
@@ -143,10 +144,17 @@ class FrameView(QWidget):
         self._image = image
         self.update()
 
+    def pixel_size(self):
+        ratio = self.devicePixelRatioF()
+        return int(self.width() * ratio), int(self.height() * ratio)
+
     def resizeEvent(self, event):
         super().resizeEvent(event)
-        ratio = self.devicePixelRatioF()
-        self.resized.emit(int(self.width() * ratio), int(self.height() * ratio))
+        self.resized.emit(*self.pixel_size())
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self.resized.emit(*self.pixel_size())
 
     def paintEvent(self, event):
         painter = QPainter(self)
@@ -180,6 +188,8 @@ def colorbar(lut: np.ndarray, low_label: str, high_label: str) -> QWidget:
 
 
 class VideoItem(QFrame):
+    """Decode a video and show it. The same video can be shown also by other VideoViews."""
+
     def __init__(self, video_filename: str, start_time: Optional[float] = None):
         super().__init__(None)
 
@@ -188,12 +198,15 @@ class VideoItem(QFrame):
 
         self.media_loaded = False
         self.duration = 0.0
+        self.depth_lut = None
         self._decoder = None
+        self._views = []
 
-        self._view = FrameView(self)
+        self._open(video_filename)
         layout = QVBoxLayout(self)
-        layout.addWidget(self._view, 1)
+        layout.addWidget(VideoView(self, self), 1)
 
+    def _open(self, video_filename: str):
         if not os.path.isfile(video_filename):
             return
         try:
@@ -205,23 +218,33 @@ class VideoItem(QFrame):
         if container.duration:
             self.duration = container.duration / av.time_base
 
-        depth_lut = None
         pixel_format = stream.codec_context.format
         if pixel_format is not None and pixel_format.name.startswith("gray16"):
-            depth_lut = depth_lookup_table()
-            layout.addWidget(
-                colorbar(
-                    depth_lut,
-                    f"{DEPTH_RANGE_M[0]:.1f} m",
-                    f"{DEPTH_RANGE_M[1]:.1f} m  (black: no data)",
-                )
-            )
+            self.depth_lut = depth_lookup_table()
 
-        self._decoder = _VideoDecoder(container, stream, depth_lut, self)
-        self._decoder.frame_ready.connect(self._view.set_image)
-        self._view.resized.connect(self._decoder.set_output_size)
+        self._decoder = _VideoDecoder(container, stream, self.depth_lut, self)
         self._decoder.start()
         self.media_loaded = True
+
+    def add_view(self, view: FrameView):
+        self._views.append(view)
+        view.resized.connect(self._update_output_size)
+        if self._decoder is not None:
+            self._decoder.frame_ready.connect(view.set_image)
+
+    def remove_view(self, view: FrameView):
+        self._views.remove(view)
+        view.resized.disconnect(self._update_output_size)
+        if self._decoder is not None:
+            self._decoder.frame_ready.disconnect(view.set_image)
+
+    def _update_output_size(self, *_):
+        """Decode the frames at the size of the largest visible view."""
+        sizes = [view.pixel_size() for view in self._views if view.isVisible()]
+        if self._decoder is not None and sizes:
+            self._decoder.set_output_size(
+                max(width for width, _ in sizes), max(height for _, height in sizes)
+            )
 
     def set_time(self, t: float):
         """Show the frame at time t (seconds from the beginning of the video)."""
@@ -233,3 +256,29 @@ class VideoItem(QFrame):
             self._decoder.stop()
             self._decoder = None
         self.media_loaded = False
+
+
+class VideoView(QWidget):
+    """Show the frames decoded by a VideoItem."""
+
+    def __init__(self, video_item: VideoItem, parent=None):
+        super().__init__(parent)
+        self._video_item = video_item
+        self._frame_view = FrameView(self)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(self._frame_view, 1)
+        if video_item.depth_lut is not None:
+            layout.addWidget(
+                colorbar(
+                    video_item.depth_lut,
+                    f"{DEPTH_RANGE_M[0]:.1f} m",
+                    f"{DEPTH_RANGE_M[1]:.1f} m  (black: no data)",
+                )
+            )
+        video_item.add_view(self._frame_view)
+
+    def release(self):
+        if self._video_item is not None:
+            self._video_item.remove_view(self._frame_view)
+            self._video_item = None
