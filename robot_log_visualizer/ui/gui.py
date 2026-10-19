@@ -953,15 +953,8 @@ class RobotViewerMainWindow(QtWidgets.QMainWindow):
             videos.append((video_label, self.video_items[-1]))
             self.logger.write_to_log("Video '" + video_filename + "' opened.")
 
-        if videos and self.video_grid is None:
-            self.video_grid = VideoGridTab(videos)
-            # right after the meshcat tab
-            tab_index = self.ui.meshcatAndVideoTab.insertTab(
-                1, self.video_grid, grid_layout_icon(2, 2), "Video grid"
-            )
-            self.ui.meshcatAndVideoTab.setTabToolTip(
-                tab_index, "Show multiple videos side by side"
-            )
+        if videos:
+            self.__add_to_video_grid(videos)
 
         # show the first frame of the videos
         self.__set_videos_position(0.0)
@@ -977,6 +970,33 @@ class RobotViewerMainWindow(QtWidgets.QMainWindow):
             "Robot name: '" + self.signal_provider.robot_name + "'."
         )
         self.logger.write_to_log("Log format version: '" + self.signal_provider.version + "'.")
+
+    def __add_to_video_grid(self, sources):
+        """Make the videos or the rendered images selectable in the video grid."""
+        if self.video_grid is not None:
+            for label, source in sources:
+                self.video_grid.add_source(label, source)
+            return
+        self.video_grid = VideoGridTab(sources)
+        # right after the meshcat tab
+        tab_index = self.ui.meshcatAndVideoTab.insertTab(
+            1, self.video_grid, grid_layout_icon(2, 2), "Video grid"
+        )
+        self.ui.meshcatAndVideoTab.setTabToolTip(
+            tab_index, "Show multiple videos and images side by side"
+        )
+
+    def __remove_from_video_grid(self, source):
+        if self.video_grid is None:
+            return
+        self.video_grid.remove_source(source)
+        if self.video_grid.is_empty:
+            self.ui.meshcatAndVideoTab.removeTab(
+                self.ui.meshcatAndVideoTab.indexOf(self.video_grid)
+            )
+            self.video_grid.release()
+            self.video_grid.deleteLater()
+            self.video_grid = None
 
     def __is_robot_model_available(self):
         # in mat files, the robot name is a resolve-robotics-uri only from MIN_ROBOT_MODEL_URI_VERSION
@@ -1386,6 +1406,7 @@ class RobotViewerMainWindow(QtWidgets.QMainWindow):
         self.image_items[item_key] = image_item
 
         label = "/".join(item_path[-3:])
+        self.__add_to_video_grid([(label, image_item)])
         tab_index = self.ui.meshcatAndVideoTab.addTab(
             image_item, get_icon("videocam-outline.svg"), label
         )
@@ -1399,6 +1420,7 @@ class RobotViewerMainWindow(QtWidgets.QMainWindow):
 
     def __remove_image_item(self, item, item_key):
         image_item = self.image_items.pop(item_key)
+        self.__remove_from_video_grid(image_item)
         tab_index = self.ui.meshcatAndVideoTab.indexOf(image_item)
         if tab_index >= 0:
             self.ui.meshcatAndVideoTab.removeTab(tab_index)

@@ -226,6 +226,9 @@ class VideoItem(QFrame):
         self._decoder.start()
         self.media_loaded = True
 
+    def create_view(self, parent=None):
+        return VideoView(self, parent)
+
     def add_view(self, view: FrameView):
         self._views.append(view)
         view.resized.connect(self._update_output_size)

@@ -6,8 +6,9 @@ from qtpy.QtCore import QRectF, Qt, Signal
 from qtpy.QtGui import QColor, QIcon, QPainter, QPen, QPixmap
 from qtpy.QtWidgets import QActionGroup, QMenu, QToolButton
 
-# (rows, columns) of the supported grids, larger grids would not leave enough space
-GRID_LAYOUTS = ((1, 1), (2, 1), (1, 2), (2, 2), (3, 2), (2, 3))
+# (rows, columns) of the supported grids, sorted by number of windows; larger grids would not
+# leave enough space
+GRID_LAYOUTS = ((1, 1), (2, 1), (1, 2), (3, 1), (1, 3), (2, 2), (3, 2), (2, 3))
 MAX_GRID_ROWS = max(rows for rows, _ in GRID_LAYOUTS)
 MAX_GRID_COLS = max(cols for _, cols in GRID_LAYOUTS)
 
