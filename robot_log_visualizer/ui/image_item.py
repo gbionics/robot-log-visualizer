@@ -9,7 +9,7 @@ from typing import List, Optional, Tuple
 import numpy as np
 from qtpy.QtCore import QTimer, Slot
 from qtpy.QtGui import QImage
-from qtpy.QtWidgets import QFrame, QVBoxLayout
+from qtpy.QtWidgets import QFrame, QVBoxLayout, QWidget
 
 from robot_log_visualizer.ui.video_item import FrameView, colorbar, depth_lookup_table
 
@@ -71,7 +71,8 @@ class ImageItem(QFrame):
     """Render a logged signal containing a scaled depth image (e.g. the input of a policy).
 
     The values are mapped to the same colormap used for the depth videos. Zero is
-    considered as missing data and rendered in black.
+    considered as missing data and rendered in black. The image can be shown also by other
+    ImageViews.
     """
 
     def __init__(self, signal_provider, path: List[str], layout: ImageLayout):
@@ -85,15 +86,35 @@ class ImageItem(QFrame):
         self._last_index = None
         self._last_render = 0.0
         self._pending = False
+        self._image = None
+        self._views = []
 
-        self._view = FrameView(self, smooth=False)
         layout_widget = QVBoxLayout(self)
-        layout_widget.addWidget(self._view, 1)
-        layout_widget.addWidget(
-            colorbar(self._lut, f"{self._low:g}", f"{self._high:g}  (black: no data)")
-        )
+        layout_widget.addWidget(ImageView(self, self), 1)
 
         self._signal_provider.update_index_signal.connect(self.refresh)
+
+    def create_view(self, parent=None):
+        return ImageView(self, parent)
+
+    def colorbar(self) -> QWidget:
+        return colorbar(self._lut, f"{self._low:g}", f"{self._high:g}  (black: no data)")
+
+    def add_view(self, view: FrameView):
+        self._views.append(view)
+        view.resized.connect(self._on_view_shown)
+        if self._image is not None:
+            view.set_image(self._image)
+
+    def remove_view(self, view: FrameView):
+        self._views.remove(view)
+        view.resized.disconnect(self._on_view_shown)
+
+    def _on_view_shown(self, *_):
+        self.refresh(force=True)
+
+    def _is_shown(self) -> bool:
+        return any(view.isVisible() for view in self._views)
 
     def _value_range(self) -> Tuple[float, float]:
         """The scaled depth is expected in [0, 1], the range is enlarged if the data exceed it."""
@@ -113,7 +134,7 @@ class ImageItem(QFrame):
         """Request to render the image at the current index of the signal provider."""
         if force:
             self._last_index = None
-        if self._pending or not self.isVisible():
+        if self._pending or not self._is_shown():
             return
         self._pending = True
         delay = self._last_render + 1.0 / MAX_REFRESH_RATE - time.monotonic()
@@ -121,7 +142,7 @@ class ImageItem(QFrame):
 
     def _render(self):
         self._pending = False
-        if self._signal_provider is None or not self.isVisible():
+        if self._signal_provider is None or not self._is_shown():
             return
         index = self._signal_provider.index
         if index == self._last_index:
@@ -134,7 +155,9 @@ class ImageItem(QFrame):
             return
         self._last_index = index
         self._last_render = time.monotonic()
-        self._view.set_image(self._to_qimage(values))
+        self._image = self._to_qimage(values)
+        for view in self._views:
+            view.set_image(self._image)
 
     def _to_qimage(self, values: np.ndarray) -> QImage:
         depth = np.nan_to_num(self._layout.to_image(values), nan=0.0)
@@ -146,10 +169,6 @@ class ImageItem(QFrame):
         height, width, _ = rgb.shape
         return QImage(rgb.data, width, height, 3 * width, QImage.Format_RGB888).copy()
 
-    def showEvent(self, event):
-        super().showEvent(event)
-        self.refresh(force=True)
-
     def release(self):
         if self._signal_provider is not None:
             try:
@@ -157,3 +176,22 @@ class ImageItem(QFrame):
             except (TypeError, RuntimeError):
                 pass
             self._signal_provider = None
+
+
+class ImageView(QWidget):
+    """Show the images rendered by an ImageItem."""
+
+    def __init__(self, image_item: ImageItem, parent=None):
+        super().__init__(parent)
+        self._image_item = image_item
+        self._frame_view = FrameView(self, smooth=False)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(self._frame_view, 1)
+        layout.addWidget(image_item.colorbar())
+        image_item.add_view(self._frame_view)
+
+    def release(self):
+        if self._image_item is not None:
+            self._image_item.remove_view(self._frame_view)
+            self._image_item = None
