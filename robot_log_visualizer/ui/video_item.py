@@ -119,7 +119,7 @@ class _VideoDecoder(QThread):
             rgb = frame.reformat(width=width, height=height, format="rgb24").to_ndarray()
         rgb = np.ascontiguousarray(rgb)
         height, width, _ = rgb.shape
-        return QImage(rgb.data, width, height, 3 * width, QImage.Format_RGB888).copy()
+        return QImage(rgb.data, width, height, 3 * width, QImage.Format.Format_RGB888).copy()
 
     def _fit(self, width: int, height: int):
         out_w, out_h = self._output_size
@@ -138,7 +138,7 @@ class FrameView(QWidget):
         self._image = None
         self._smooth = smooth
         self.setMinimumSize(1, 1)
-        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 
     def set_image(self, image: QImage):
         self._image = image
@@ -158,13 +158,13 @@ class FrameView(QWidget):
 
     def paintEvent(self, event):
         painter = QPainter(self)
-        painter.fillRect(self.rect(), Qt.black)
+        painter.fillRect(self.rect(), Qt.GlobalColor.black)
         if self._image is None:
             return
-        size = self._image.size().scaled(self.size(), Qt.KeepAspectRatio)
+        size = self._image.size().scaled(self.size(), Qt.AspectRatioMode.KeepAspectRatio)
         rect = QRect(0, 0, size.width(), size.height())
         rect.moveCenter(self.rect().center())
-        painter.setRenderHint(QPainter.SmoothPixmapTransform, self._smooth)
+        painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, self._smooth)
         painter.drawImage(rect, self._image)
 
 
@@ -174,12 +174,12 @@ def colorbar(lut: np.ndarray, low_label: str, high_label: str) -> QWidget:
     layout.setContentsMargins(0, 0, 0, 0)
 
     gradient = np.ascontiguousarray(np.repeat(lut[None], 2, axis=0))
-    image = QImage(gradient.data, 256, 2, 3 * 256, QImage.Format_RGB888).copy()
+    image = QImage(gradient.data, 256, 2, 3 * 256, QImage.Format.Format_RGB888).copy()
     bar = QLabel()
     bar.setPixmap(QPixmap.fromImage(image))
     bar.setScaledContents(True)
     bar.setFixedHeight(14)
-    bar.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
+    bar.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
 
     layout.addWidget(QLabel(low_label))
     layout.addWidget(bar, 1)

@@ -167,7 +167,7 @@ class ImageItem(QFrame):
         rgb[depth == 0] = 0
         rgb = np.ascontiguousarray(rgb)
         height, width, _ = rgb.shape
-        return QImage(rgb.data, width, height, 3 * width, QImage.Format_RGB888).copy()
+        return QImage(rgb.data, width, height, 3 * width, QImage.Format.Format_RGB888).copy()
 
     def release(self):
         if self._signal_provider is not None:

@@ -3,8 +3,8 @@
 # Released under the terms of the BSD 3-Clause License
 
 from qtpy.QtCore import QRectF, Qt, Signal
-from qtpy.QtGui import QColor, QIcon, QPainter, QPen, QPixmap
-from qtpy.QtWidgets import QActionGroup, QMenu, QToolButton
+from qtpy.QtGui import QActionGroup, QColor, QIcon, QPainter, QPen, QPixmap
+from qtpy.QtWidgets import QMenu, QToolButton
 
 # (rows, columns) of the supported grids, sorted by number of windows; larger grids would not
 # leave enough space
@@ -15,7 +15,7 @@ MAX_GRID_COLS = max(cols for _, cols in GRID_LAYOUTS)
 
 def grid_layout_icon(rows, cols, size=24):
     pixmap = QPixmap(size, size)
-    pixmap.fill(Qt.transparent)
+    pixmap.fill(Qt.GlobalColor.transparent)
     painter = QPainter(pixmap)
     painter.setPen(QPen(QColor("#444444"), 1))
     painter.setBrush(QColor("#cfe3f7"))
@@ -55,7 +55,7 @@ class GridLayoutButton(QToolButton):
     def __init__(self, tooltip, parent=None):
         super().__init__(parent)
         self.setToolTip(tooltip)
-        self.setPopupMode(QToolButton.InstantPopup)
+        self.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
         menu = QMenu(self)
         group = QActionGroup(self)
         self._actions = {}

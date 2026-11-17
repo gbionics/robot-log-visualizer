@@ -150,7 +150,9 @@ def build_plot_title_box_dialog():
     la = QVBoxLayout(dlg)
     line_edit = QLineEdit()
     la.addWidget(line_edit)
-    bb = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+    bb = QDialogButtonBox(
+        QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+    )
     bb.clicked.connect(dlg.accept)
     bb.rejected.connect(dlg.reject)
     la.addWidget(bb)
@@ -162,8 +164,8 @@ def get_icon(icon_name):
     icon = QtGui.QIcon()
     icon.addPixmap(
         QtGui.QPixmap(str(pathlib.Path(__file__).parent / "misc" / icon_name)),
-        QtGui.QIcon.Normal,
-        QtGui.QIcon.Off,
+        QtGui.QIcon.Mode.Normal,
+        QtGui.QIcon.State.Off,
     )
     return icon
 
@@ -317,7 +319,9 @@ class RobotViewerMainWindow(QtWidgets.QMainWindow):
         self.ui.tabPlotWidget.currentChanged.connect(self.plotTabBar_currentChanged)
 
         # add a custom context menu to the variable tree widget
-        self.ui.variableTreeWidget.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.ui.variableTreeWidget.setContextMenuPolicy(
+            Qt.ContextMenuPolicy.CustomContextMenu
+        )
         self.ui.variableTreeWidget.customContextMenuRequested.connect(
             self.variableTreeWidget_on_right_click
         )
@@ -363,8 +367,8 @@ class RobotViewerMainWindow(QtWidgets.QMainWindow):
         if not self.dataset_loaded:
             return
 
-        if event.modifiers() & Qt.ControlModifier:
-            if event.key() == Qt.Key_B:
+        if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
+            if event.key() == Qt.Key.Key_B:
                 self.slider_pressed = True
                 new_index = int(self.ui.timeSlider.value()) - 1
                 dataset_percentage = float(new_index) / float(
@@ -381,7 +385,7 @@ class RobotViewerMainWindow(QtWidgets.QMainWindow):
                 # update the time slider
                 self.ui.timeSlider.setValue(new_index)
                 self.slider_pressed = False
-            elif event.key() == Qt.Key_F:
+            elif event.key() == Qt.Key.Key_F:
                 self.slider_pressed = True
                 new_index = int(self.ui.timeSlider.value()) + 1
                 dataset_percentage = float(new_index) / float(
@@ -399,7 +403,7 @@ class RobotViewerMainWindow(QtWidgets.QMainWindow):
                 self.slider_pressed = False
         else:
             # If the user presses the space bar, the play/pause state is toggled.
-            if event.key() == Qt.Key_Space:
+            if event.key() == Qt.Key.Key_Space:
                 # toggle the play/pause button
                 if self.ui.startButton.isEnabled():
                     self.ui.startButton.click()
@@ -500,7 +504,7 @@ class RobotViewerMainWindow(QtWidgets.QMainWindow):
 
     def plotTabBar_on_doubleClick(self, index):
         dlg, plot_title = build_plot_title_box_dialog()
-        if dlg.exec_() == QDialog.Accepted:
+        if dlg.exec() == QDialog.DialogCode.Accepted:
             self.ui.tabPlotWidget.setTabText(index, plot_title.text())
 
     def variableTreeWidget_on_click(self):
@@ -791,7 +795,7 @@ class RobotViewerMainWindow(QtWidgets.QMainWindow):
         for key, value in obj.items():
             item = QTreeWidgetItem([key])
             item = self.__populate_variable_tree_widget(value, item)
-            item.setFlags(item.flags() & ~Qt.ItemIsSelectable)
+            item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsSelectable)
             parent.addChild(item)
         return parent
 
@@ -833,7 +837,7 @@ class RobotViewerMainWindow(QtWidgets.QMainWindow):
                     break
             if child_item is None:
                 child_item = QTreeWidgetItem([key])
-                child_item.setFlags(child_item.flags() & ~Qt.ItemIsSelectable)
+                child_item.setFlags(child_item.flags() & ~Qt.ItemFlag.ItemIsSelectable)
                 parent.addChild(child_item)
                 self._update_variable_tree_widget(value, child_item)
         return parent
@@ -849,7 +853,7 @@ class RobotViewerMainWindow(QtWidgets.QMainWindow):
             item = QTreeWidgetItem([key])
             item = self.__populate_text_logging_tree_widget(value, item)
             if "data" not in value.keys():
-                item.setFlags(item.flags() & ~Qt.ItemIsSelectable)
+                item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsSelectable)
             parent.addChild(item)
         return parent
 
@@ -898,7 +902,7 @@ class RobotViewerMainWindow(QtWidgets.QMainWindow):
         # populate tree
         root = list(self.signal_provider.data.keys())[0]
         root_item = QTreeWidgetItem([root])
-        root_item.setFlags(root_item.flags() & ~Qt.ItemIsSelectable)
+        root_item.setFlags(root_item.flags() & ~Qt.ItemFlag.ItemIsSelectable)
         items = self.__populate_variable_tree_widget(
             self.signal_provider.data[root], root_item
         )
@@ -908,7 +912,7 @@ class RobotViewerMainWindow(QtWidgets.QMainWindow):
         if self.signal_provider.text_logging_data:
             root = list(self.signal_provider.text_logging_data.keys())[0]
             root_item = QTreeWidgetItem([root])
-            root_item.setFlags(root_item.flags() & ~Qt.ItemIsSelectable)
+            root_item.setFlags(root_item.flags() & ~Qt.ItemFlag.ItemIsSelectable)
             items = self.__populate_text_logging_tree_widget(
                 self.signal_provider.text_logging_data[root], root_item
             )
@@ -1036,7 +1040,7 @@ class RobotViewerMainWindow(QtWidgets.QMainWindow):
         # only display one root in the gui
         root = list(self.signal_provider.data.keys())[0]
         root_item = QTreeWidgetItem([root])
-        root_item.setFlags(root_item.flags() & ~Qt.ItemIsSelectable)
+        root_item.setFlags(root_item.flags() & ~Qt.ItemFlag.ItemIsSelectable)
         items = self.__populate_variable_tree_widget(
             self.signal_provider.data[root], root_item
         )
@@ -1086,15 +1090,15 @@ class RobotViewerMainWindow(QtWidgets.QMainWindow):
             self,
             self.dataset_loaded,
         )
-        outcome = dlg.exec_()
-        if outcome == QDialog.Accepted:
+        outcome = dlg.exec()
+        if outcome == QDialog.DialogCode.Accepted:
 
             # check which button was clicked
             button_role = dlg.get_clicked_button_role()
             button_text = dlg.get_clicked_button_text()
             std_button = dlg.get_clicked_standard_button()
 
-            if std_button == QtWidgets.QDialogButtonBox.SaveAll:
+            if std_button == QtWidgets.QDialogButtonBox.StandardButton.SaveAll:
                 if not self.dataset_loaded:
                     self.meshcat_provider.model_path = dlg.get_urdf_path()
                     self.meshcat_provider.custom_package_dir = (
@@ -1109,7 +1113,7 @@ class RobotViewerMainWindow(QtWidgets.QMainWindow):
                 self.signal_provider.set_custom_max_arrow(
                     not dlg.ui.arrowScaling_checkBox.isChecked(), arrow_scaling_value
                 )
-            if std_button == QtWidgets.QDialogButtonBox.Save:
+            if std_button == QtWidgets.QDialogButtonBox.StandardButton.Save:
                 # we need to check which tab is selected in the dlg
                 if dlg.ui.tabWidget.currentIndex() == 0:
                     if not self.dataset_loaded:
@@ -1159,7 +1163,7 @@ class RobotViewerMainWindow(QtWidgets.QMainWindow):
         if self.ui.variableTreeWidget.topLevelItemCount() == 0:
             menu = QtWidgets.QMenu()
             menu.addAction("Open a mat file")
-            action = menu.exec_(self.ui.variableTreeWidget.mapToGlobal(item_position))
+            action = menu.exec(self.ui.variableTreeWidget.mapToGlobal(item_position))
             if action is None:
                 return
             if action.text() == "Open a mat file":
@@ -1271,7 +1275,7 @@ class RobotViewerMainWindow(QtWidgets.QMainWindow):
             return
 
         # show the menu
-        action = menu.exec_(self.ui.variableTreeWidget.mapToGlobal(item_position))
+        action = menu.exec(self.ui.variableTreeWidget.mapToGlobal(item_position))
         if action is None:
             return
 
@@ -1584,8 +1588,4 @@ if __name__ == "__main__":
     # show the main window
     gui.show()
 
-    exec_method = getattr(app, "exec", None)
-    if exec_method is None:
-        exec_method = app.exec_
-
-    sys.exit(exec_method())
+    sys.exit(app.exec())

@@ -40,9 +40,8 @@ dependencies = [
     "idyntree >= 10.2.0",
     "meshcat",
     "numpy",
-    "PyQt5",
-    "PyQtWebEngine",
-    "qtpy",
+    "PySide6>=6.5,<7",
+    "qtpy>=2.4",
     "pyqtconsole",
     "resolve-robotics-uri-py",
     "h5py",
@@ -83,10 +82,9 @@ test = { cmd = "python -m pytest tests -q", description = "Check GUI startup, lo
 [tool.pixi.dependencies]
 pytest = "*"
 numpy = "*"
-qtpy = "*"
-pyqt = "*"
-pyqtwebengine = "*"
-pyside2 = "*"
+qtpy = ">=2.4"
+pyside6 = ">=6.10,<7"
+qt6-webengine = ">=6.10,<7"
 pyqtgraph = "*"
 av = "*"
 matplotlib = "*"

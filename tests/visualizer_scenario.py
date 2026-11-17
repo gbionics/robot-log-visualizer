@@ -1,7 +1,7 @@
 """GUI scenario run in a separate pytest process by test_visualizer.py.
 
 The child process isolates native Qt crashes and allows a hard timeout.
-3D rendering, video, and streaming require manual testing.
+3D rendering and real-time streaming require manual testing.
 """
 
 import time
@@ -39,25 +39,29 @@ def sample_log(tmp_path):
     return log, timestamps, values
 
 
-@pytest.fixture
-def application(monkeypatch):
-    # Set these before importing Qt, including when running on a desktop.
-    monkeypatch.setenv("QT_API", "pyqt5")
-    monkeypatch.setenv("QT_QPA_PLATFORM", "offscreen")
-    monkeypatch.setenv("QT_QUICK_BACKEND", "software")
-    monkeypatch.setenv("QTWEBENGINE_CHROMIUM_FLAGS", "--disable-gpu")
+@pytest.fixture(scope="session")
+def application():
+    with pytest.MonkeyPatch.context() as monkeypatch:
+        # Set these before importing Qt, including when running on a desktop.
+        monkeypatch.setenv("QT_API", "pyside6")
+        monkeypatch.setenv("QT_QPA_PLATFORM", "offscreen")
+        monkeypatch.setenv("QT_QUICK_BACKEND", "software")
+        monkeypatch.setenv("QTWEBENGINE_CHROMIUM_FLAGS", "--disable-gpu")
 
-    from qtpy.QtCore import Qt
-    from qtpy.QtWidgets import QApplication
-    # Import WebEngine before constructing QApplication, as in the entry point.
-    from robot_log_visualizer import __main__  # noqa: F401
-    import pyqtgraph as pg
+        from qtpy import API_NAME, QT_VERSION
+        from qtpy.QtCore import Qt
+        from qtpy.QtWidgets import QApplication
+        # Import WebEngine before constructing QApplication, as in the entry point.
+        from robot_log_visualizer import __main__  # noqa: F401
+        import pyqtgraph as pg
 
-    pg.setConfigOption("useOpenGL", False)
-    QApplication.setAttribute(Qt.AA_UseSoftwareOpenGL)
-    app = QApplication([])
-    yield app
-    app.processEvents()
+        pg.setConfigOption("useOpenGL", False)
+        assert API_NAME == "PySide6"
+        assert QT_VERSION.startswith("6.")
+        QApplication.setAttribute(Qt.ApplicationAttribute.AA_UseSoftwareOpenGL)
+        app = QApplication([])
+        yield app
+        app.processEvents()
 
 
 @pytest.fixture
@@ -151,3 +155,98 @@ def test_log_loading_plotting_and_playback(visualizer, sample_log, wait_until, m
     paused_index = window.signal_provider.index
     QTest.qWait(100)
     assert window.signal_provider.index == paused_index
+
+    # Exercise the QActionGroup menu and the named layouts loaded from Designer.
+    window.plot_layout_button._actions[(2, 2)].trigger()
+    assert len(window.plot_tabs[0].visible_plot_items) == 4
+    window.plot_layout_button._actions[(1, 1)].trigger()
+    assert len(window.plot_tabs[0].visible_plot_items) == 1
+
+    from qtpy.QtCore import QTimer
+    from qtpy.QtWidgets import QDialog, QDialogButtonBox
+    from robot_log_visualizer.ui.gui import SetRobotModelDialog, build_plot_title_box_dialog
+
+    dialog = SetRobotModelDialog(provider, window, dataset_loaded=True)
+    assert dialog.ui.frameNameComboBox.findText("base") >= 0
+    QTimer.singleShot(0, dialog.reject)
+    assert dialog.exec() == QDialog.DialogCode.Rejected
+    dialog.deleteLater()
+
+    dialog, title = build_plot_title_box_dialog()
+    title.setText("Qt 6 plot")
+    buttons = dialog.findChild(QDialogButtonBox)
+    QTimer.singleShot(0, buttons.button(QDialogButtonBox.StandardButton.Ok).click)
+    assert dialog.exec() == QDialog.DialogCode.Accepted
+    assert title.text() == "Qt 6 plot"
+    dialog.deleteLater()
+
+
+@pytest.mark.parametrize("depth", [False, True], ids=["rgb", "depth"])
+def test_video_frames(application, wait_until, tmp_path, depth):
+    """Check decoding, QImage buffers, frame painting, and the depth colorbar."""
+    import av
+    from robot_log_visualizer.ui.video_item import VideoItem
+
+    video_path = tmp_path / "video.mkv"
+    if depth:
+        pixels = np.full((16, 16), 1000, dtype=np.uint16)
+        pixels[0, 0] = 0
+        pixel_format = "gray16le"
+    else:
+        pixels = np.zeros((16, 16, 3), dtype=np.uint8)
+        pixels[:, :, 0] = 255
+        pixel_format = "rgb24"
+    with av.open(str(video_path), "w") as container:
+        stream = container.add_stream("ffv1", rate=10)
+        stream.width = stream.height = 16
+        stream.pix_fmt = "gray16le" if depth else "bgr0"
+        for _ in range(2):
+            frame = av.VideoFrame.from_ndarray(pixels, format=pixel_format)
+            for packet in stream.encode(frame):
+                container.mux(packet)
+        for packet in stream.encode():
+            container.mux(packet)
+
+    item = VideoItem(str(video_path))
+    try:
+        assert item.media_loaded
+        item.show()
+        received = []
+        item._decoder.frame_ready.connect(received.append)
+        item.set_time(0)
+        wait_until(lambda: bool(received), "Video decoder did not deliver a QImage")
+        image = received[-1]
+        assert (image.width(), image.height()) == (16, 16)
+        if depth:
+            assert image.pixelColor(0, 0).getRgb()[:3] == (0, 0, 0)
+            assert image.pixelColor(1, 1).getRgb()[:3] != (0, 0, 0)
+            assert item.depth_lut is not None
+        else:
+            assert image.pixelColor(0, 0).getRgb()[:3] == (255, 0, 0)
+        assert not item.grab().isNull()
+    finally:
+        decoder = item._decoder
+        item.release()
+        item.close()
+        assert not decoder.isRunning()
+
+
+def test_signal_image(application):
+    from qtpy.QtWidgets import QWidget
+    from robot_log_visualizer.signal_provider.matfile_signal_provider import MatfileSignalProvider
+    from robot_log_visualizer.ui.image_item import ImageItem, ImageLayout
+
+    provider = MatfileSignalProvider(0.03, "test")
+    item = ImageItem(provider, [], ImageLayout(2, 2))
+    try:
+        image = item._to_qimage(np.array([0.0, 0.25, 0.5, 1.0]))
+        assert (image.width(), image.height()) == (2, 2)
+        assert image.pixelColor(0, 0).getRgb()[:3] == (0, 0, 0)
+        assert image.pixelColor(1, 1).getRgb()[:3] != (0, 0, 0)
+        item.show()
+        item._views[0].set_image(image)
+        assert not item.grab().isNull()
+        assert isinstance(item.colorbar(), QWidget)
+    finally:
+        item.release()
+        item.close()

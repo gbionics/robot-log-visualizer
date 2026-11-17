@@ -27,8 +27,8 @@ class _VideoCell(QFrame):
         self._combo.setToolTip("Video or image shown in this window")
 
         self._placeholder = QLabel("No video selected")
-        self._placeholder.setAlignment(Qt.AlignCenter)
-        self._placeholder.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Ignored)
+        self._placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._placeholder.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Ignored)
         self._placeholder.setStyleSheet("background-color: black; color: #aaaaaa;")
 
         layout = QVBoxLayout(self)

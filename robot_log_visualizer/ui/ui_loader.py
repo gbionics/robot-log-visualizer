@@ -10,6 +10,7 @@ from importlib import resources
 from typing import Any
 
 from qtpy import uic
+from qtpy.QtCore import QObject
 
 
 class UiProxy:
@@ -25,7 +26,15 @@ class UiProxy:
         super().__setattr__("_target", target)
 
     def __getattr__(self, name: str) -> Any:
-        return getattr(self._target, name)
+        try:
+            return getattr(self._target, name)
+        except AttributeError:
+            # PySide's QUiLoader does not expose named layouts and actions as
+            # Python attributes, unlike PyQt's uic.loadUi.
+            child = self._target.findChild(QObject, name)
+            if child is None:
+                raise
+            return child
 
     def __setattr__(self, name: str, value: Any) -> None:
         setattr(self._target, name, value)
