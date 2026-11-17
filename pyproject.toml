@@ -72,14 +72,16 @@ local_scheme = "dirty-tag"
 
 [tool.pixi.workspace]
 channels = ["conda-forge"]
-platforms = ["linux-64", "osx-64", "win-64"]
+platforms = ["linux-64", "osx-arm64", "win-64"]
 
 [tool.pixi.pypi-dependencies]
 robot-log-visualizer = { path = ".", editable = true }
 
 [tool.pixi.tasks]
+test = { cmd = "python -m pytest tests -q", description = "Check GUI startup, log loading, plotting, and playback without a display" }
 
 [tool.pixi.dependencies]
+pytest = "*"
 numpy = "*"
 qtpy = "*"
 pyqt = "*"
