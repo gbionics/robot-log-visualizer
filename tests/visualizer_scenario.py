@@ -62,7 +62,7 @@ def application():
         pg.setConfigOption("useOpenGL", False)
         assert API_NAME == "PySide6"
         assert QT_VERSION.startswith("6.")
-        QApplication.setAttribute(Qt.ApplicationAttribute.AA_UseSoftwareOpenGL)
+        QApplication.setAttribute(Qt.AA_UseSoftwareOpenGL)
         app = QApplication([])
         yield app
         app.processEvents()
