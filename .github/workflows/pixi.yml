@@ -11,13 +11,14 @@ permissions:
 
 jobs:
   test:
-    name: Test (${{ matrix.os }})
+    name: Test (${{ matrix.os }}, ${{ matrix.environment }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
+        environment: [default, pyqt5]
 
     steps:
       - uses: actions/checkout@v6
@@ -26,5 +27,6 @@ jobs:
         with:
           pixi-version: v0.83.0
           cache: true
+          environments: ${{ matrix.environment }}
       - name: Run tests
-        run: pixi run --locked test
+        run: pixi run --locked -e ${{ matrix.environment }} test

@@ -97,3 +97,14 @@ pyqtconsole = "*"
 meshcat-python = "*"
 resolve-robotics-uri-py = "*"
 
+[tool.pixi.feature.pyqt5.dependencies]
+pyqt = ">=5.15,<6"
+pyqtwebengine = ">=5.15,<6"
+
+[tool.pixi.feature.pyqt5.activation.env]
+QT_API = "pyqt5"
+
+[tool.pixi.environments]
+default = []
+pyqt5 = ["pyqt5"]
+

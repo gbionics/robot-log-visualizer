@@ -4,6 +4,8 @@ The child process isolates native Qt crashes and allows a hard timeout.
 3D rendering and real-time streaming require manual testing.
 """
 
+import gc
+import os
 import sys
 import time
 
@@ -44,7 +46,8 @@ def sample_log(tmp_path):
 def application():
     with pytest.MonkeyPatch.context() as monkeypatch:
         # Set these before importing Qt, including when running on a desktop.
-        monkeypatch.setenv("QT_API", "pyside6")
+        qt_api = os.environ.get("QT_API", "pyside6")
+        monkeypatch.setenv("QT_API", qt_api)
         # Use the runner's Windows desktop for WebEngine's native surfaces.
         # The offscreen plugin cannot provide the same Windows graphics setup.
         platform = "windows" if sys.platform == "win32" else "offscreen"
@@ -60,11 +63,17 @@ def application():
         import pyqtgraph as pg
 
         pg.setConfigOption("useOpenGL", False)
-        assert API_NAME == "PySide6"
-        assert QT_VERSION.startswith("6.")
+        expected_api, expected_version = {
+            "pyside6": ("PySide6", "6."),
+            "pyqt5": ("PyQt5", "5."),
+        }[qt_api]
+        assert API_NAME == expected_api
+        assert QT_VERSION.startswith(expected_version)
         QApplication.setAttribute(Qt.AA_UseSoftwareOpenGL)
         app = QApplication([])
         yield app
+        # Dispose Python/Qt reference cycles while QApplication is still alive.
+        gc.collect()
         app.processEvents()
 
 
@@ -99,10 +108,11 @@ def visualizer(application, wait_until):
                 )
 
         page = window.ui.meshcatView.page()
-        page.loadingChanged.connect(record_load)
+        if hasattr(page, "loadingChanged"):  # Qt 6 only
+            page.loadingChanged.connect(record_load)
         page.renderProcessTerminated.connect(
             lambda status, code: load_errors.append(
-                f"Renderer terminated: {status.name} (exit code {code})"
+                f"Renderer terminated: {status!r} (exit code {code})"
             )
         )
         window.ui.meshcatView.loadFinished.connect(loaded.append)
