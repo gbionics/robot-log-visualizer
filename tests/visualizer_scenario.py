@@ -4,6 +4,7 @@ The child process isolates native Qt crashes and allows a hard timeout.
 3D rendering and real-time streaming require manual testing.
 """
 
+import sys
 import time
 
 import h5py
@@ -44,7 +45,10 @@ def application():
     with pytest.MonkeyPatch.context() as monkeypatch:
         # Set these before importing Qt, including when running on a desktop.
         monkeypatch.setenv("QT_API", "pyside6")
-        monkeypatch.setenv("QT_QPA_PLATFORM", "offscreen")
+        # Use the runner's Windows desktop for WebEngine's native surfaces.
+        # The offscreen plugin cannot provide the same Windows graphics setup.
+        platform = "windows" if sys.platform == "win32" else "offscreen"
+        monkeypatch.setenv("QT_QPA_PLATFORM", platform)
         monkeypatch.setenv("QT_QUICK_BACKEND", "software")
         monkeypatch.setenv("QTWEBENGINE_CHROMIUM_FLAGS", "--disable-gpu")
 
@@ -85,10 +89,26 @@ def visualizer(application, wait_until):
     window = RobotViewerMainWindow(0.03, provider, 0.03)
     try:
         loaded = []
+        load_errors = []
+
+        def record_load(info):
+            if info.errorCode():
+                load_errors.append(
+                    f"{info.url().toString()}: {info.errorDomain().name} "
+                    f"({info.errorCode()}): {info.errorString()}"
+                )
+
+        page = window.ui.meshcatView.page()
+        page.loadingChanged.connect(record_load)
+        page.renderProcessTerminated.connect(
+            lambda status, code: load_errors.append(
+                f"Renderer terminated: {status.name} (exit code {code})"
+            )
+        )
         window.ui.meshcatView.loadFinished.connect(loaded.append)
         window.show()
         wait_until(lambda: bool(loaded), "Meshcat page did not finish loading")
-        assert loaded[-1], "Meshcat page failed to load"
+        assert loaded[-1], f"Meshcat page failed to load: {load_errors}"
         yield window, provider
     finally:
         window.close()
