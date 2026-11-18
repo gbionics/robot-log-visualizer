@@ -56,6 +56,22 @@ following command
 python -m pip install git+https://github.com/ami-iit/robot-log-visualizer.git
 ```
 
+### Using PyQt5
+
+Since `robot-log-visualizer>=0.15.0`, the default Qt binding is [PySide6](https://wiki.qt.io/Qt_for_Python), and the package metadata declares PySide6 dependencies.
+
+To use PyQt5 instead, install the application as usual, then manually install the additional dependencies:
+
+* On PyPI: `python -m pip install PyQt5 PyQtWebEngine`
+* On conda-forge: `conda install -c conda-forge "pyqt>=5.15,<6" "pyqtwebengine>=5.15,<6"`
+
+Set the `QT_API` environment variable to `pyqt5`, then run the application:
+
+```bash
+export QT_API=pyqt5
+robot-log-visualizer
+```
+
 ## 🏃 Usage
 
 Once you have installed the `robot-log-visualizer` you can run it from the terminal.

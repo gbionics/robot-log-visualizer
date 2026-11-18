@@ -40,9 +40,8 @@ dependencies = [
     "idyntree >= 10.2.0",
     "meshcat",
     "numpy",
-    "PyQt5",
-    "PyQtWebEngine",
-    "qtpy",
+    "PySide6>=6.5,<7",
+    "qtpy>=2.4",
     "pyqtconsole",
     "resolve-robotics-uri-py",
     "h5py",
@@ -72,19 +71,20 @@ local_scheme = "dirty-tag"
 
 [tool.pixi.workspace]
 channels = ["conda-forge"]
-platforms = ["linux-64", "osx-64", "win-64"]
+platforms = ["linux-64", "osx-arm64", "win-64"]
 
 [tool.pixi.pypi-dependencies]
 robot-log-visualizer = { path = ".", editable = true }
 
 [tool.pixi.tasks]
+test = { cmd = "python -m pytest tests -q", description = "Check GUI startup, log loading, plotting, and playback without a display" }
 
 [tool.pixi.dependencies]
+pytest = "*"
 numpy = "*"
-qtpy = "*"
-pyqt = "*"
-pyqtwebengine = "*"
-pyside2 = "*"
+qtpy = ">=2.4"
+pyside6 = ">=6.10,<7"
+qt6-webengine = ">=6.10,<7"
 pyqtgraph = "*"
 av = "*"
 matplotlib = "*"
@@ -96,4 +96,15 @@ idyntree = "*"
 pyqtconsole = "*"
 meshcat-python = "*"
 resolve-robotics-uri-py = "*"
+
+[tool.pixi.feature.pyqt5.dependencies]
+pyqt = ">=5.15,<6"
+pyqtwebengine = ">=5.15,<6"
+
+[tool.pixi.feature.pyqt5.activation.env]
+QT_API = "pyqt5"
+
+[tool.pixi.environments]
+default = []
+pyqt5 = ["pyqt5"]
 
