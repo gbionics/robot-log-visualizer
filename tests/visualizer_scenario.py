@@ -54,6 +54,10 @@ def application():
         monkeypatch.setenv("QT_QPA_PLATFORM", platform)
         monkeypatch.setenv("QT_QUICK_BACKEND", "software")
         monkeypatch.setenv("QTWEBENGINE_CHROMIUM_FLAGS", "--disable-gpu")
+        if sys.platform == "win32":
+            # The sandboxed renderer cannot reliably load the conda DLLs on
+            # Windows CI. These tests only visit the local Meshcat server.
+            monkeypatch.setenv("QTWEBENGINE_DISABLE_SANDBOX", "1")
 
         from qtpy import API_NAME, QT_VERSION
         from qtpy.QtCore import Qt
@@ -112,7 +116,8 @@ def visualizer(application, wait_until):
             page.loadingChanged.connect(record_load)
         page.renderProcessTerminated.connect(
             lambda status, code: load_errors.append(
-                f"Renderer terminated: {status!r} (exit code {code})"
+                f"Renderer terminated: {status!r} "
+                f"(exit code {code}, 0x{code & 0xFFFFFFFF:08X})"
             )
         )
         window.ui.meshcatView.loadFinished.connect(loaded.append)
